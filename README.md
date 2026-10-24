@@ -4,12 +4,23 @@ A mobile-friendly web app (installable PWA, works offline) that turns a distance
 
 **Strategies:** even pace, negative split, progressive build, fast start (positive split), alternating, pyramid, stair steps, interval style.
 
-**Options**
-- Round paces to the nearest 1/5/10 s, and hold one pace for each split or for 2/3/5 km blocks. Optionally compensate so the finish stays on target.
-- Treadmill mode: plans are shown in km/h and snapped to 0.1 km/h (or 0.2/0.5/1.0 when rounding is on).
-- Split length of 1 km, 500 m or 400 m, adjustable pace variation, and interval hard/easy pattern.
+**Setup**
+- Goal as finish time, average pace or average speed. Switching between them keeps the same goal.
+- Any split length in metres, with presets for 200 m, 400 m, 500 m, 1 km, 1 mile, 2 km and 5 km.
+- Outdoor or treadmill. Treadmill plans are in km/h, snapped to 0.1 km/h.
 
-Each selected strategy shows a summary, a pace plan, a chart and a split table, plus a comparison chart. "Copy plan" copies the plan as text.
+**Options**
+- Rounding: round pace to the nearest 1/5/10/15 s, or treadmill speed to 0.1/0.2/0.5/1.0 km/h. Hold one pace per split, per km or per 2/3/5/10 km block, and optionally compensate to stay on target.
+- Race adjustments for every strategy: an easier first km and a finish kick in the last km. The rest of the run rebalances to keep the goal time.
+- Per-strategy tuning in each card: pace swing, negative-split switch point, alternating length, pyramid peak position, number of stair steps, and interval hard/easy/warm-up/cool-down splits.
+
+**Output for each strategy**
+- Finish time, difference from goal, average, fastest and slowest pace, and both halves.
+- Pace plan as merged blocks with the elapsed time at each change, plus checkpoint times every 5 km and at the half.
+- Chart of pace (or speed) by distance, or time ahead of or behind even pace. Tap the chart for split details.
+- Split table with pace, speed, split time, elapsed time and time vs even pace. "Copy plan" copies it as text.
+- A comparison chart and table when several strategies are selected.
+- "Copy share link" copies a link that opens the app with the same settings.
 
 ## Host on GitHub Pages
 1. Push these files to the root of the `main` branch of `najwanhamidi/SplitCalculator`.

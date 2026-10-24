@@ -14,7 +14,7 @@
 <body>
 <header class="top">
   <h1>Split Calculator</h1>
-  <p>Set a distance and goal time. Get pacing plans you can actually follow.</p>
+  <p>Set a distance and goal. Get pacing plans you can actually follow.</p>
 </header>
 
 <main>
@@ -24,6 +24,7 @@
       <label for="km">Distance (km)</label>
       <input id="km" type="number" inputmode="decimal" step="any" min="0.1" max="250" autocomplete="off">
       <div class="chips" id="presets" role="group" aria-label="Distance presets">
+        <button type="button" data-km="3">3K</button>
         <button type="button" data-km="5">5K</button>
         <button type="button" data-km="10">10K</button>
         <button type="button" data-km="15">15K</button>
@@ -31,14 +32,42 @@
         <button type="button" data-km="42.195">Marathon</button>
       </div>
     </div>
-    <fieldset class="field">
-      <legend>Target time</legend>
-      <div class="time">
-        <label><input id="th" type="number" inputmode="numeric" min="0" max="99" placeholder="0"><span>h</span></label>
-        <label><input id="tm" type="number" inputmode="numeric" min="0" max="59" placeholder="0"><span>min</span></label>
-        <label><input id="ts" type="number" inputmode="numeric" min="0" max="59" placeholder="0"><span>sec</span></label>
+
+    <div class="field">
+      <span class="lbl" id="l-goal">Goal</span>
+      <div class="seg three" role="radiogroup" aria-labelledby="l-goal" id="goalSeg">
+        <button type="button" role="radio" data-goal="time">Finish time</button>
+        <button type="button" role="radio" data-goal="pace">Avg pace</button>
+        <button type="button" role="radio" data-goal="speed">Avg speed</button>
       </div>
-    </fieldset>
+      <div class="time" id="goalTime">
+        <label><input id="th" type="number" inputmode="numeric" min="0" max="99" placeholder="0" aria-label="Hours"><span>h</span></label>
+        <label><input id="tm" type="number" inputmode="numeric" min="0" max="59" placeholder="0" aria-label="Minutes"><span>min</span></label>
+        <label><input id="ts" type="number" inputmode="numeric" min="0" max="59" placeholder="0" aria-label="Seconds"><span>sec</span></label>
+      </div>
+      <div class="time two" id="goalPace" hidden>
+        <label><input id="pm" type="number" inputmode="numeric" min="1" max="30" aria-label="Pace minutes"><span>min</span></label>
+        <label><input id="ps" type="number" inputmode="numeric" min="0" max="59" placeholder="0" aria-label="Pace seconds"><span>sec /km</span></label>
+      </div>
+      <div class="time one" id="goalSpeed" hidden>
+        <label><input id="spd" type="number" inputmode="decimal" step="0.1" min="1" max="30" aria-label="Average speed"><span>km/h</span></label>
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="splitM">Split length (metres)</label>
+      <input id="splitM" type="number" inputmode="numeric" min="50" step="any">
+      <div class="chips" id="splitPresets" role="group" aria-label="Split length presets">
+        <button type="button" data-split="200">200 m</button>
+        <button type="button" data-split="400">400 m</button>
+        <button type="button" data-split="500">500 m</button>
+        <button type="button" data-split="1000">1 km</button>
+        <button type="button" data-split="1609.34">1 mile</button>
+        <button type="button" data-split="2000">2 km</button>
+        <button type="button" data-split="5000">5 km</button>
+      </div>
+    </div>
+
     <div class="field">
       <span class="lbl" id="l-mode">Where are you running?</span>
       <div class="seg" role="radiogroup" aria-labelledby="l-mode">
@@ -50,56 +79,60 @@
   </section>
 
   <details class="panel" id="opts">
-    <summary>Options</summary>
+    <summary>Rounding and race adjustments</summary>
+    <h3 class="sub-h">Rounding</h3>
     <div class="opt">
       <label class="switch"><input type="checkbox" id="round"><span>Round paces to make them easier to follow</span></label>
       <div class="sub" id="roundOpts">
         <div class="grid2">
-          <label id="stepWrap"><span id="stepLbl">Round to nearest</span>
+          <label><span id="stepLbl">Round to nearest</span>
             <select id="paceStep">
-              <option value="1">1 sec</option><option value="5">5 sec</option><option value="10">10 sec</option>
+              <option value="1">1 sec</option><option value="5">5 sec</option><option value="10">10 sec</option><option value="15">15 sec</option>
             </select>
             <select id="speedStep" hidden>
               <option value="0.1">0.1 km/h</option><option value="0.2">0.2 km/h</option><option value="0.5">0.5 km/h</option><option value="1">1 km/h</option>
             </select>
           </label>
-          <label><span>Hold the same pace for</span>
+          <label><span>Hold one pace for</span>
             <select id="group">
-              <option value="0">Each split</option><option value="2">2 km blocks</option><option value="3">3 km blocks</option><option value="5">5 km blocks</option>
+              <option value="0">Each split</option><option value="1">Each km</option><option value="2">2 km blocks</option>
+              <option value="3">3 km blocks</option><option value="5">5 km blocks</option><option value="10">10 km blocks</option>
             </select>
           </label>
         </div>
-        <label class="switch"><input type="checkbox" id="comp"><span>Compensate so the finish stays on target</span></label>
-        <p class="hint">Without compensation, rounding can move your finish time a few seconds. Compensating keeps it close but may add an extra pace change.</p>
       </div>
       <p class="hint" id="tmHint" hidden>Treadmill speeds always snap to 0.1 km/h, the smallest step most belts allow.</p>
+      <div id="compWrap">
+        <label class="switch"><input type="checkbox" id="comp"><span>Compensate so the finish stays on target</span></label>
+        <p class="hint">Rounding can move your finish by a few seconds. Compensating keeps it close, but may add an extra pace change.</p>
+      </div>
     </div>
+    <h3 class="sub-h">Race adjustments</h3>
+    <p class="hint">Applied to every strategy. The rest of the run adjusts so the total time still matches your goal.</p>
     <div class="opt grid2">
-      <label><span>Split length</span>
-        <select id="splitM">
-          <option value="1000">1 km</option><option value="500">500 m</option><option value="400">400 m (track lap)</option>
-        </select>
+      <label><span>Easier first km: <b id="firstOut">0</b> s/km slower</span>
+        <input type="range" id="firstSlow" min="0" max="45" step="1">
       </label>
-      <label><span>Pace variation: ±<b id="varOut">2</b>%</span>
-        <input type="range" id="variation" min="1" max="6" step="0.5">
+      <label><span>Finish kick: <b id="kickOut">0</b> s/km faster in the last km</span>
+        <input type="range" id="kick" min="0" max="45" step="1">
       </label>
-    </div>
-    <div class="opt grid2">
-      <label><span>Interval: hard splits</span><input type="number" id="hard" min="1" max="10" inputmode="numeric"></label>
-      <label><span>Interval: easy splits</span><input type="number" id="easy" min="1" max="10" inputmode="numeric"></label>
     </div>
   </details>
 
   <section class="panel" aria-labelledby="h-strat">
     <h2 id="h-strat">Strategies</h2>
     <div class="chips strat" id="strats" role="group" aria-label="Choose strategies to show"></div>
+    <div class="actions">
+      <button type="button" class="btn" id="share">Copy share link</button>
+      <button type="button" class="btn" id="reset">Reset all</button>
+    </div>
   </section>
 
   <div id="msg" class="msg" role="alert" hidden></div>
   <section id="results" aria-live="polite"></section>
 </main>
 
-<footer>Plans scale pace variation so the total time always equals your target, unless rounding is on.</footer>
+<footer>Each plan keeps your total time equal to the goal unless rounding is on. Settings are saved on this device.</footer>
 <script src="engine.js"></script>
 <script src="app.js"></script>
 </body>
