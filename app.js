@@ -72,6 +72,42 @@
       { k: 'every', label: 'Walk every', min: 0.4, max: 5, step: 0.1, fmt: function (v) { return (+v).toFixed(1) + ' km'; } },
       { k: 'ws', label: 'Walk for', min: 15, max: 180, step: 5, fmt: function (v) { return v + ' s'; } },
       { k: 'wp', label: 'Walking pace', min: 420, max: 960, step: 15, fmt: function (v) { return E.fmtT(v) + ' /km'; } }
+    ],
+    controlled: [
+      { k: 'v', label: 'Slower by', min: 0.5, max: 8, step: 0.5, fmt: function (v) { return v + '%'; } },
+      { k: 'first', label: 'Hold back for the first', min: 5, max: 40, step: 5, fmt: PCT }
+    ],
+    sitkick: [
+      { k: 'v', label: 'Kick faster by', min: 1, max: 15, step: 0.5, fmt: function (v) { return v + '%'; } },
+      { k: 'last', label: 'Kick for the last', min: 2, max: 25, step: 1, fmt: PCT }
+    ],
+    midsurge: [
+      { k: 'v', label: 'Surge faster by', min: 1, max: 10, step: 0.5, fmt: function (v) { return v + '%'; } },
+      { k: 'at', label: 'Centred at', min: 20, max: 80, step: 5, fmt: PCT },
+      { k: 'len', label: 'Surge length', min: 5, max: 40, step: 5, fmt: PCT }
+    ],
+    blocks3: [
+      { k: 'v', label: 'Block swing', min: 0.5, max: 8, step: 0.5, fmt: SW },
+      { k: 'a', label: 'Easy block', min: 10, max: 60, step: 1, fmt: PCT },
+      { k: 'b', label: 'Goal-pace block', min: 10, max: 60, step: 1, fmt: PCT }
+    ],
+    ladder: [
+      { k: 'v', label: 'Hard vs easy', min: 1, max: 12, step: 0.5, fmt: SW },
+      { k: 'peak', label: 'Longest rep', min: 2, max: 6, step: 1, fmt: function (v) { return v + (v == 1 ? ' split' : ' splits'); } },
+      { k: 'easy', label: 'Recovery', min: 1, max: 4, step: 1, fmt: function (v) { return v + (v == 1 ? ' split' : ' splits'); } },
+      { k: 'wu', label: 'Warm-up', min: 0, max: 5, step: 1, fmt: function (v) { return v + (v == 1 ? ' split' : ' splits'); } },
+      { k: 'cd', label: 'Cool-down', min: 0, max: 5, step: 1, fmt: function (v) { return v + (v == 1 ? ' split' : ' splits'); } }
+    ],
+    surges: [
+      { k: 'v', label: 'Surge faster by', min: 1, max: 12, step: 0.5, fmt: function (v) { return v + '%'; } },
+      { k: 'every', label: 'Surge every', min: 2, max: 10, step: 1, fmt: function (v) { return v + (v == 1 ? ' split' : ' splits'); } },
+      { k: 'len', label: 'Surge length', min: 1, max: 3, step: 1, fmt: function (v) { return v + (v == 1 ? ' split' : ' splits'); } }
+    ],
+    sandwich: [
+      { k: 'v', label: 'Easy vs tempo', min: 2, max: 15, step: 0.5, fmt: SW },
+      { k: 'wu', label: 'Warm-up', min: 0, max: 30, step: 5, fmt: PCT },
+      { k: 'mid', label: 'Recovery between', min: 5, max: 40, step: 5, fmt: PCT },
+      { k: 'cd', label: 'Cool-down', min: 0, max: 30, step: 5, fmt: PCT }
     ]
   };
 

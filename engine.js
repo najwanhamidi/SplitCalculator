@@ -10,6 +10,10 @@
     { id: 'ushape', group: 'race', name: 'U-shaped', blurb: 'Faster first and last stretches, steadier middle. The shape of many earlier distance world records.' },
     { id: 'jshape', group: 'race', name: 'J-shaped', blurb: 'Start quicker than the middle, settle, then an end spurt that is the fastest part of the race.' },
     { id: 'revj', group: 'race', name: 'Reverse J', blurb: 'Fastest at the start, settle in the middle, then a smaller end spurt.' },
+    { id: 'controlled', group: 'race', name: 'Controlled start', blurb: 'Hold back for the opening stretch while the field settles, then lock into an even pace.' },
+    { id: 'sitkick', group: 'race', name: 'Sit and kick', blurb: 'Even pace, saving energy for a hard, short sprint to the line.' },
+    { id: 'midsurge', group: 'race', name: 'Mid-race surge', blurb: 'Even running with a sustained tactical surge in the middle to break away, then settle.' },
+    { id: 'blocks3', group: 'race', name: 'Three-block plan', blurb: 'Easy, goal pace, then hard, like the 10-10-10 marathon plan (10 mi easy, 10 mi steady, 10K strong).' },
     { id: 'progressive', group: 'workout', name: 'Progression run', blurb: 'Pace drops a little every split, from an easy start to a hard finish.' },
     { id: 'fastfinish', group: 'workout', name: 'Fast-finish long run', blurb: 'Steady running, then the last part at a quicker pace. A staple of marathon long runs.' },
     { id: 'tempo', group: 'workout', name: 'Tempo run', blurb: 'Easy warm-up, a sustained comfortably hard block, easy cool-down.' },
@@ -18,6 +22,9 @@
     { id: 'pyramid', group: 'workout', name: 'Pyramid', blurb: 'Ease in, peak, ease out. The fastest splits sit around the peak point.' },
     { id: 'stairs', group: 'workout', name: 'Stair steps', blurb: 'Hold a pace for a block, then step faster. Each block is quicker than the last.' },
     { id: 'interval', group: 'workout', name: 'Interval style', blurb: 'Easy warm-up, hard blocks with easy recoveries, easy cool-down.' },
+    { id: 'ladder', group: 'workout', name: 'Ladder intervals', blurb: 'Hard reps get longer, then shorter (1-2-3-2-1 splits), with easy recoveries between.' },
+    { id: 'surges', group: 'workout', name: 'Steady with surges', blurb: 'Steady running with a short surge at regular intervals. Practises changing gear.' },
+    { id: 'sandwich', group: 'workout', name: 'Tempo sandwich', blurb: 'Two tempo blocks split by an easy recovery stretch, with a warm-up and cool-down.' },
     { id: 'runwalk', group: 'workout', name: 'Run-walk', blurb: 'Planned walk breaks at fixed distances (Galloway method). Running pace adjusts so the total still hits the goal.' }
   ];
 
@@ -37,7 +44,14 @@
     fastfinish: { v: 3, last: 25 },
     tempo: { v: 5, wu: 20, cd: 15 },
     fartlek: { v: 3, seed: 1 },
-    runwalk: { every: 1.6, ws: 60, wp: 540 }   // walk 60 s every 1.6 km at 9:00 /km
+    runwalk: { every: 1.6, ws: 60, wp: 540 },
+    controlled: { v: 3, first: 15 },
+    sitkick: { v: 6, last: 8 },
+    midsurge: { v: 3, at: 50, len: 15 },
+    blocks3: { v: 3, a: 38, b: 38 },
+    ladder: { v: 4, peak: 3, easy: 1, wu: 1, cd: 1 },
+    surges: { v: 5, every: 4, len: 1 },
+    sandwich: { v: 5, wu: 15, mid: 15, cd: 10 }   // walk 60 s every 1.6 km at 9:00 /km
   };
   function params(id, sp) {
     return Object.assign({}, PARAM_DEFAULTS[id] || {}, (sp && sp[id]) || {});
@@ -87,6 +101,23 @@
       return ((r ^ r >>> 14) >>> 0) / 4294967296;
     };
   }
+  /* Ladder: +1 easy / -1 hard per split. Reps of 1..peak..1 splits with easy recoveries, repeated to fill. */
+  function ladder(n, p) {
+    const wu = Math.max(0, p.wu), cd = Math.max(0, p.cd), out = [];
+    if (n < wu + cd + 3) { for (let i = 0; i < n; i++) out.push(i % 2 ? -1 : 1); return out; }
+    for (let i = 0; i < wu; i++) out.push(1);
+    const reps = [];
+    for (let k = 1; k <= p.peak; k++) reps.push(k);
+    for (let k = p.peak - 1; k >= 1; k--) reps.push(k);
+    let r = 0;
+    while (out.length < n - cd) {
+      const len = reps[r % reps.length]; r++;
+      for (let k = 0; k < len && out.length < n - cd; k++) out.push(-1);
+      for (let k = 0; k < p.easy && out.length < n - cd; k++) out.push(1);
+    }
+    while (out.length < n) out.push(1);
+    return out;
+  }
   function fartlek(n, v, seed) {
     const R = rng(seed), out = [];
     let surge = false;
@@ -104,6 +135,7 @@
     const v = (p.v || 0) / 100;
     const n = segs.length;
     const fk = id === 'fartlek' ? fartlek(n, v, p.seed) : null;
+    const lad = id === 'ladder' ? ladder(n, p) : null;
     return segs.map(function (s, i) {
       if (s.walk) return 0;
       const x = (s.startM + s.d / 2) / totalM;
@@ -136,6 +168,24 @@
         case 'fastfinish': return x > 1 - p.last / 100 ? 1 - v : 1 + v * 0.3;
         case 'tempo': return (x < p.wu / 100 || x > 1 - p.cd / 100) ? 1 + v : 1 - v * 0.4;
         case 'fartlek': return fk[i];
+        case 'controlled': return x < p.first / 100 ? 1 + v : 1;
+        case 'sitkick': return x > 1 - p.last / 100 ? 1 - v : 1;
+        case 'midsurge': {
+          const a = p.at / 100 - p.len / 200, b = p.at / 100 + p.len / 200;
+          return x >= a && x < b ? 1 - v : 1;
+        }
+        case 'blocks3': return x < p.a / 100 ? 1 + v : (x < (p.a + p.b) / 100 ? 1 : 1 - v);
+        case 'ladder': return 1 + v * lad[i];
+        case 'surges': {
+          const every = Math.max(2, p.every), len = Math.min(p.len, every - 1);
+          return (i % every) >= every - len ? 1 - v : 1;
+        }
+        case 'sandwich': {
+          const wu = p.wu / 100, cd = p.cd / 100, mid = p.mid / 100;
+          if (x < wu || x > 1 - cd) return 1 + v;
+          const c = (wu + 1 - cd) / 2;
+          return Math.abs(x - c) < mid / 2 ? 1 + v : 1 - v * 0.4;
+        }
         default: return 1;
       }
     });

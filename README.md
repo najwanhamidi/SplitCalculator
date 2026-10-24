@@ -2,9 +2,9 @@
 
 A mobile-friendly web app (installable PWA, works offline) that turns a distance and a goal time into pacing plans.
 
-**Race pacing** (pacing profiles described in sports-science research): even pace, negative split, fast start (positive split), U-shaped, J-shaped and reverse J.
+**Race pacing** (pacing profiles described in sports-science research): even pace, negative split, fast start (positive split), U-shaped, J-shaped, reverse J, controlled start, sit and kick, mid-race surge, and a three-block plan (e.g. 10-10-10 marathon).
 
-**Workouts**: progression run, fast-finish long run, tempo run, alternating, fartlek, pyramid, stair steps, interval style, and run-walk (Galloway-style walk breaks at a set walking pace).
+**Workouts**: progression run, fast-finish long run, tempo run, alternating, fartlek, pyramid, stair steps, interval style, ladder intervals, steady with surges, tempo sandwich, and run-walk (Galloway-style walk breaks at a set walking pace).
 
 **Setup**
 - Goal as finish time, average pace or average speed. Switching between them keeps the same goal.
