@@ -2,7 +2,9 @@
 
 A mobile-friendly web app (installable PWA, works offline) that turns a distance and a goal time into pacing plans.
 
-**Strategies:** even pace, negative split, progressive build, fast start (positive split), alternating, pyramid, stair steps, interval style.
+**Race pacing** (pacing profiles described in sports-science research): even pace, negative split, fast start (positive split), U-shaped, J-shaped and reverse J.
+
+**Workouts**: progression run, fast-finish long run, tempo run, alternating, fartlek, pyramid, stair steps, interval style, and run-walk (Galloway-style walk breaks at a set walking pace).
 
 **Setup**
 - Goal as finish time, average pace or average speed. Switching between them keeps the same goal.
@@ -12,13 +14,13 @@ A mobile-friendly web app (installable PWA, works offline) that turns a distance
 **Options**
 - Rounding: round pace to the nearest 1/5/10/15 s, or treadmill speed to 0.1/0.2/0.5/1.0 km/h. Hold one pace per split, per km or per 2/3/5/10 km block, and optionally compensate to stay on target.
 - Race adjustments for every strategy: an easier first km and a finish kick in the last km. The rest of the run rebalances to keep the goal time.
-- Per-strategy tuning in each card: pace swing, negative-split switch point, alternating length, pyramid peak position, number of stair steps, and interval hard/easy/warm-up/cool-down splits.
+- Per-strategy tuning in each card: pace swing, negative-split switch point, alternating length, pyramid peak position, number of stair steps, and interval hard/easy/warm-up/cool-down splits, J-curve slowest point, tempo warm-up/cool-down share, fast-finish length, fartlek pattern, and run-walk interval, walk time and walking pace.
 
 **Output for each strategy**
 - Finish time, difference from goal, average, fastest and slowest pace, and both halves.
 - Pace plan as merged blocks with the elapsed time at each change, plus checkpoint times every 5 km and at the half.
 - Chart of pace (or speed) by distance, or time ahead of or behind even pace. Tap the chart for split details.
-- Split table with pace, speed, split time, elapsed time and time vs even pace. "Copy plan" copies it as text.
+- Split table with pace, speed, time, elapsed time and time vs even pace. View it per selected split, per km or per 5 km; rows where the pace changes mid-row show the average. "Copy plan" copies it as text.
 - A comparison chart and table when several strategies are selected.
 - "Copy share link" copies a link that opens the app with the same settings.
 

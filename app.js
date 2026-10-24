@@ -9,7 +9,9 @@
     firstSlow: 0, kick: 0,
     sel: ['even', 'negative', 'alternating'],
     sp: {},      // per-strategy settings
-    view: {}     // per-card chart view: 'pace' | 'bank'
+    view: {},    // per-card chart view: 'pace' | 'bank'
+    tview: 'split', // table rows: 'split' | 'km' | '5k'
+    slots: {}    // strategy -> colour slot 1..8, kept while selected
   };
   var STRATS = E.STRATEGIES;
   var st = load();
@@ -17,6 +19,7 @@
   var last = {};                                 // latest plan per strategy (for hover/copy)
 
   /* Per-strategy controls shown in each card's "Adjust" panel. */
+  var SW = function (v) { return '±' + v + '%'; }, PCT = function (v) { return v + '% of distance'; };
   var TUNE = {
     negative: [
       { k: 'v', label: 'Pace swing', min: 0.5, max: 8, step: 0.5, fmt: function (v) { return '±' + v + '%'; } },
@@ -42,6 +45,33 @@
       { k: 'easy', label: 'Easy', min: 1, max: 10, step: 1, fmt: function (v) { return v + (v > 1 ? ' splits' : ' split'); } },
       { k: 'wu', label: 'Warm-up', min: 0, max: 5, step: 1, fmt: function (v) { return v + (v === 1 ? ' split' : ' splits'); } },
       { k: 'cd', label: 'Cool-down', min: 0, max: 5, step: 1, fmt: function (v) { return v + (v === 1 ? ' split' : ' splits'); } }
+    ],
+    ushape: [{ k: 'v', label: 'Pace swing', min: 0.5, max: 8, step: 0.5, fmt: SW }],
+    jshape: [
+      { k: 'v', label: 'Pace swing', min: 0.5, max: 8, step: 0.5, fmt: SW },
+      { k: 'low', label: 'Slowest at', min: 25, max: 75, step: 5, fmt: PCT }
+    ],
+    revj: [
+      { k: 'v', label: 'Pace swing', min: 0.5, max: 8, step: 0.5, fmt: SW },
+      { k: 'low', label: 'Slowest at', min: 25, max: 75, step: 5, fmt: PCT }
+    ],
+    fastfinish: [
+      { k: 'v', label: 'Pace swing', min: 1, max: 10, step: 0.5, fmt: SW },
+      { k: 'last', label: 'Fast for the last', min: 5, max: 50, step: 5, fmt: PCT }
+    ],
+    tempo: [
+      { k: 'v', label: 'Easy vs tempo', min: 2, max: 15, step: 0.5, fmt: SW },
+      { k: 'wu', label: 'Warm-up', min: 0, max: 40, step: 5, fmt: PCT },
+      { k: 'cd', label: 'Cool-down', min: 0, max: 40, step: 5, fmt: PCT }
+    ],
+    fartlek: [
+      { k: 'v', label: 'Surge size', min: 1, max: 12, step: 0.5, fmt: SW },
+      { k: 'seed', label: 'Pattern', min: 1, max: 30, step: 1, fmt: function (v) { return '#' + v; } }
+    ],
+    runwalk: [
+      { k: 'every', label: 'Walk every', min: 0.4, max: 5, step: 0.1, fmt: function (v) { return (+v).toFixed(1) + ' km'; } },
+      { k: 'ws', label: 'Walk for', min: 15, max: 180, step: 5, fmt: function (v) { return v + ' s'; } },
+      { k: 'wp', label: 'Walking pace', min: 420, max: 960, step: 15, fmt: function (v) { return E.fmtT(v) + ' /km'; } }
     ]
   };
 
@@ -65,9 +95,19 @@
   }
   function save() { try { localStorage.setItem(KEY, JSON.stringify(st)); } catch (e) {} }
 
-  var colorOf = function (id) {
-    for (var i = 0; i < STRATS.length; i++) if (STRATS[i].id === id) return 'var(--s' + (i + 1) + ')';
-  };
+  /* Colours: up to 8 selected strategies each hold a categorical slot while selected, so a colour
+     never jumps when others are toggled. Any further selections are drawn in neutral grey. */
+  function syncSlots() {
+    var used = {};
+    Object.keys(st.slots).forEach(function (id) {
+      if (st.sel.indexOf(id) < 0 || used[st.slots[id]]) delete st.slots[id]; else used[st.slots[id]] = 1;
+    });
+    st.sel.forEach(function (id) {
+      if (st.slots[id]) return;
+      for (var k = 1; k <= 8; k++) if (!used[k]) { st.slots[id] = k; used[k] = 1; return; }
+    });
+  }
+  var colorOf = function (id) { return st.slots[id] ? 'var(--s' + st.slots[id] + ')' : 'var(--ink3)'; };
   var nameOf = function (id) { return STRATS.filter(function (s) { return s.id === id; })[0].name; };
   var tm = function () { return st.mode === 'treadmill'; };
   var unit = function () { return tm() ? 'km/h' : '/km'; };
@@ -96,13 +136,15 @@
     $('round').checked = st.round; $('comp').checked = st.comp;
     $('paceStep').value = st.paceStep; $('speedStep').value = st.speedStep; $('group').value = st.group;
     $('firstSlow').value = st.firstSlow; $('kick').value = st.kick;
-    var box = $('strats'); box.innerHTML = '';
-    STRATS.forEach(function (s, i) {
-      var b = document.createElement('button');
-      b.type = 'button'; b.dataset.id = s.id; b.style.setProperty('--c', 'var(--s' + (i + 1) + ')');
-      b.innerHTML = '<span class="dot"></span>' + s.name;
-      box.appendChild(b);
+    var box = $('strats'), html = '';
+    [['race', 'Race pacing'], ['workout', 'Workouts']].forEach(function (g) {
+      html += '<h3 class="sub-h">' + g[1] + '</h3><div class="chips strat" role="group" aria-label="' + g[1] + '">';
+      STRATS.forEach(function (s) {
+        if (s.group === g[0]) html += '<button type="button" data-id="' + s.id + '"><span class="dot"></span>' + s.name + '</button>';
+      });
+      html += '</div>';
     });
+    box.innerHTML = html;
     syncUi();
   }
   /* Show the goal in all three forms. The goal time st.T stays the source of truth. */
@@ -117,7 +159,9 @@
   function syncUi() {
     pressed('[data-mode]', function (b) { return b.dataset.mode === st.mode; });
     pressed('[data-goal]', function (b) { return b.dataset.goal === st.goal; });
+    syncSlots();
     pressed('#strats button', function (b) { return st.sel.indexOf(b.dataset.id) >= 0; });
+    document.querySelectorAll('#strats button').forEach(function (b) { b.style.setProperty('--c', colorOf(b.dataset.id)); });
     pressed('#presets button', function (b) { return Math.abs(+b.dataset.km - st.km) < 1e-6; });
     pressed('#splitPresets button', function (b) { return Math.abs(+b.dataset.split - st.splitM) < 0.01; });
     $('goalTime').hidden = st.goal !== 'time'; $('goalPace').hidden = st.goal !== 'pace'; $('goalSpeed').hidden = st.goal !== 'speed';
@@ -187,6 +231,20 @@
       '<div class="grid2">' + fields + '</div><button type="button" class="btn" data-resetstrat="' + id + '">Reset to default</button></details>';
   }
 
+  /* Table row options: the chosen split, whole km, and 5 km blocks where they add something. */
+  function splitName() {
+    var m = st.splitM;
+    if (Math.abs(m - 1609.34) < 0.5) return '1 mile';
+    return m >= 1000 ? (Math.round(m / 10) / 100) + ' km' : Math.round(m) + ' m';
+  }
+  function tableViews(r) {
+    var v = [{ k: 'split', label: 'Per split (' + splitName() + ')', len: st.splitM }];
+    if (Math.abs(st.splitM - 1000) > 0.01 && r.totalM > 1000) v.push({ k: 'km', label: 'Per km', len: 1000 });
+    if (Math.abs(st.splitM - 5000) > 0.01 && r.totalM > 10000) v.push({ k: '5k', label: 'Per 5 km', len: 5000 });
+    return v;
+  }
+  function currentView(tv) { return tv.filter(function (v) { return v.k === st.tview; })[0] || tv[0]; }
+
   function bodyHtml(r) {
     var id = r.id;
     var d = Math.round(r.diff);
@@ -195,7 +253,7 @@
     var halfNote = Math.abs(hd) < 0.5 ? 'even halves' : (hd < 0 ? 'negative by ' : 'positive by ') + E.fmtT(Math.abs(hd));
 
     var runs = E.runs(r, tm()).map(function (x) {
-      return '<li>' + kmTxt(x.startM) + '–' + kmTxt(x.endM) + ' km · <b>' + x.label + '</b> ' + unit() + ' · until ' + E.fmtT(x.endT) + '</li>';
+      return '<li' + (x.walk ? ' class="walk"' : '') + '>' + kmTxt(x.startM) + '–' + kmTxt(x.endM) + ' km · ' + (x.walk ? 'walk ' : '') + '<b>' + x.label + '</b> ' + unit() + ' · until ' + E.fmtT(x.endT) + '</li>';
     }).join('');
     var cps = E.checkpoints(r);
     var cpHtml = cps.length ? '<div class="cp"><h4>Checkpoints</h4><ul class="plan">' + cps.map(function (c) {
@@ -203,18 +261,25 @@
     }).join('') + '</ul></div>' : '';
 
     var view = st.view[id] === 'bank' ? 'bank' : 'pace';
+    var tv = tableViews(r), cur = currentView(tv);
     var head = tm()
-      ? '<th>To km</th><th>km/h</th><th>Pace</th><th>Split</th><th>Elapsed</th><th>Vs even</th>'
-      : '<th>To km</th><th>Pace</th><th>km/h</th><th>Split</th><th>Elapsed</th><th>Vs even</th>';
-    var prev = null;
-    var rows = r.segs.map(function (g) {
+      ? '<th>To km</th><th>km/h</th><th>Pace</th><th>Time</th><th>Elapsed</th><th>Vs even</th>'
+      : '<th>To km</th><th>Pace</th><th>km/h</th><th>Time</th><th>Elapsed</th><th>Vs even</th>';
+    var prev = null, anyMixed = false;
+    var tr = E.windows(r, cur.len);
+    var rows = tr.map(function (g) {
       var key = tm() ? g.speed.toFixed(1) : E.fmtT(g.pace);
       var chg = prev !== null && key !== prev; prev = key;
+      var avg = g.mixed ? ' <small>avg</small>' : '';
+      if (g.mixed) anyMixed = true;
       var cells = tm()
-        ? '<td class="pv">' + g.speed.toFixed(1) + '</td><td>' + E.fmtT(g.pace) + '</td>'
-        : '<td class="pv">' + E.fmtT(g.pace) + '</td><td>' + g.speed.toFixed(1) + '</td>';
-      return '<tr' + (chg ? ' class="chg"' : '') + '><td>' + kmTxt(g.endM) + '</td>' + cells + '<td>' + E.fmtT(g.time) + '</td><td>' + E.fmtT(g.cum) + '</td><td>' + E.fmtSigned(g.bank) + '</td></tr>';
+        ? '<td class="pv">' + g.speed.toFixed(1) + avg + '</td><td>' + E.fmtT(g.pace) + '</td>'
+        : '<td class="pv">' + E.fmtT(g.pace) + avg + '</td><td>' + g.speed.toFixed(1) + '</td>';
+      return '<tr' + (chg ? ' class="chg"' : '') + '><td>' + kmTxt(g.endM) + (g.walk ? ' <small>walk</small>' : '') + '</td>' + cells + '<td>' + E.fmtT(g.time) + '</td><td>' + E.fmtT(g.cum) + '</td><td>' + E.fmtSigned(g.bank) + '</td></tr>';
     }).join('');
+    var tvSeg = tv.length > 1 ? '<div class="seg sm" role="radiogroup" aria-label="Table rows">' + tv.map(function (v) {
+      return '<button type="button" role="radio" data-tview="' + v.k + '" aria-checked="' + (v.k === cur.k) + '">' + v.label + '</button>';
+    }).join('') + '</div>' : '';
 
     return '<dl class="stats">' +
       stat('Finish', E.fmtT(r.finish)) + stat('Vs goal', delta) + stat('Average', pv(r.avgPace)) +
@@ -226,29 +291,33 @@
       '<button type="button" role="radio" data-view="bank" data-card="' + id + '" aria-checked="' + (view === 'bank') + '">Time vs even</button></div>' +
       (view === 'bank' ? chartBank(r) : chartSingle(r)) +
       '<div class="readout" id="ro-' + id + '">Tap or hover the chart for split details.</div>' +
-      '<details class="tbl" data-tbl="' + id + '"' + (ui.tableClosed[id] ? '' : ' open') + '><summary>Split table (' + r.segs.length + ' splits)</summary><div class="tablewrap"><table><thead><tr>' + head + '</tr></thead><tbody>' + rows + '</tbody></table></div>' +
+      '<details class="tbl" data-tbl="' + id + '"' + (ui.tableClosed[id] ? '' : ' open') + '><summary>Split table (' + tr.length + ' rows, ' + cur.label.toLowerCase() + ')</summary>' + tvSeg + '<div class="tablewrap"><table><thead><tr>' + head + '</tr></thead><tbody>' + rows + '</tbody></table></div>' +
+      (anyMixed ? '<p class="note">avg: the pace changes inside this row, so the value shown is the average. The pace plan above lists every change.</p>' : '') +
       '<p class="note">Vs even: time behind (+) or ahead (−) of running the goal at a perfectly even pace.</p></details>' +
       '<div class="actions"><button type="button" class="btn" data-copy="' + id + '">Copy plan</button></div>';
   }
 
   function compareInner(plans) {
     var rs = plans.map(function (p) { return p.r; });
-    var sc = scale(rs);
-    var lines = plans.map(function (p) {
+    var sc = scale(rs, true);
+    var drawn = plans.filter(function (p) { return st.slots[p.s.id]; });
+    var lines = drawn.map(function (p) {
       return '<path class="ln" d="' + stepPath(sc, p.r) + '" style="stroke:' + colorOf(p.s.id) + '"/>';
     }).join('');
-    var leg = plans.map(function (p) { return '<li style="--c:' + colorOf(p.s.id) + '"><i></i>' + esc(p.s.name) + '</li>'; }).join('');
+    var leg = drawn.map(function (p) { return '<li style="--c:' + colorOf(p.s.id) + '"><i></i>' + esc(p.s.name) + '</li>'; }).join('');
+    var extra = plans.length - drawn.length;
     var rows = plans.map(function (p) {
       var r = p.r;
       return '<tr style="--c:' + colorOf(p.s.id) + '"><td><i></i>' + esc(p.s.name) + '</td><td>' + E.fmtT(r.finish) + '</td><td>' + E.fmtT(r.half1) + '</td><td>' + E.fmtT(r.half2) + '</td><td>' +
-        (tm() ? (3600 / r.fastest).toFixed(1) : E.fmtT(r.fastest)) + '</td><td>' + (tm() ? (3600 / r.slowest).toFixed(1) : E.fmtT(r.slowest)) + '</td><td>' + E.runs(r, tm()).length + '</td></tr>';
+        (tm() ? (3600 / r.fastest).toFixed(1) : E.fmtT(r.fastest)) + '</td><td>' + (tm() ? (3600 / r.slowest).toFixed(1) : E.fmtT(r.slowest)) + '</td><td>' + (E.runs(r, tm()).length - 1) + '</td></tr>';
     }).join('');
     return '<h3>Compare</h3>' +
-      '<p class="blurb">' + (tm() ? 'Treadmill speed (km/h)' : 'Pace per km') + ' for every selected strategy. Higher is faster.</p>' +
+      '<p class="blurb">' + (tm() ? 'Treadmill speed (km/h)' : 'Pace per km') + ' for every selected strategy. Higher is faster.' + (rs.some(function (r) { return r.segs.some(function (g) { return g.walk; }); }) ? ' Walk breaks run off the bottom edge.' : '') + '</p>' +
       '<svg class="chart" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Comparison of selected strategies">' + axes(sc) + lines + '</svg>' +
       '<ul class="legend">' + leg + '</ul>' +
+      (extra > 0 ? '<p class="note">The chart shows up to 8 strategies so each keeps a distinct colour. ' + extra + ' more ' + (extra > 1 ? 'are' : 'is') + ' in the table below.</p>' : '') +
       '<div class="tablewrap compare-table"><table class="cmp"><thead><tr><th>Strategy</th><th>Finish</th><th>1st half</th><th>2nd half</th><th>Fastest</th><th>Slowest</th><th>Changes</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
-      '<p class="note">Changes: how many different ' + (tm() ? 'speeds' : 'paces') + ' you need to switch between.</p>';
+      '<p class="note">Changes: how many times you change ' + (tm() ? 'speed' : 'pace') + ' during the run.</p>';
   }
 
   /* ---------- charts ---------- */
@@ -261,10 +330,10 @@
     var pw = W - ML - MR;
     return function (m) { return ML + m / totalM * pw; };
   }
-  function scale(rs) {
+  function scale(rs, skipWalk) {
     var lo = Infinity, hi = -Infinity;
     rs.forEach(function (r) {
-      r.segs.forEach(function (g) { var v = tm() ? g.speed : g.pace; lo = Math.min(lo, v); hi = Math.max(hi, v); });
+      r.segs.forEach(function (g) { if (skipWalk && g.walk) return; var v = tm() ? g.speed : g.pace; lo = Math.min(lo, v); hi = Math.max(hi, v); });
     });
     var minRange = tm() ? 1.2 : 24;
     var range = Math.max(hi - lo, minRange), mid = (hi + lo) / 2;
@@ -300,7 +369,7 @@
   function stepPath(sc, r) {
     var d = '';
     r.segs.forEach(function (g, i) {
-      var y = sc.Y(sc.val(g)).toFixed(1), x0 = sc.X(g.startM).toFixed(1), x1 = sc.X(g.endM).toFixed(1);
+      var y = Math.min(sc.base, Math.max(MT, sc.Y(sc.val(g)))).toFixed(1), x0 = sc.X(g.startM).toFixed(1), x1 = sc.X(g.endM).toFixed(1);
       d += (i === 0 ? 'M' : 'L') + x0 + ',' + y + 'L' + x1 + ',' + y;
     });
     return d;
@@ -372,17 +441,19 @@
     var v = tm() ? g.speed.toFixed(1) + ' km/h (' + E.fmtT(g.pace) + ' /km)' : E.fmtT(g.pace) + ' /km (' + g.speed.toFixed(1) + ' km/h)';
     var bank = Math.round(g.bank);
     var bt = bank === 0 ? 'level with even pace' : E.fmtT(Math.abs(bank)) + (bank < 0 ? ' ahead of even' : ' behind even');
-    $('ro-' + id).textContent = kmTxt(g.startM) + '–' + kmTxt(g.endM) + ' km: ' + v + ', split ' + E.fmtT(g.time) + ', elapsed ' + E.fmtT(g.cum) + ', ' + bt;
+    $('ro-' + id).textContent = kmTxt(g.startM) + '–' + kmTxt(g.endM) + ' km: ' + (g.walk ? 'walk ' : '') + v + ', split ' + E.fmtT(g.time) + ', elapsed ' + E.fmtT(g.cum) + ', ' + bt;
   }
   function copyText(id) {
     var r = last[id] || E.plan(id, cfg());
     var lines = [nameOf(id) + ' · ' + st.km + ' km · ' + (tm() ? 'treadmill' : 'outdoor') + ' · finish ' + E.fmtT(r.finish)];
-    E.runs(r, tm()).forEach(function (x) { lines.push(kmTxt(x.startM) + '–' + kmTxt(x.endM) + ' km: ' + x.label + ' ' + unit() + ' (until ' + E.fmtT(x.endT) + ')'); });
+    E.runs(r, tm()).forEach(function (x) { lines.push(kmTxt(x.startM) + '–' + kmTxt(x.endM) + ' km: ' + (x.walk ? 'walk ' : '') + x.label + ' ' + unit() + ' (until ' + E.fmtT(x.endT) + ')'); });
     var cps = E.checkpoints(r);
     if (cps.length) lines.push('Checkpoints: ' + cps.map(function (c) { return c.label + ' ' + E.fmtT(c.t); }).join(', '));
     lines.push('');
-    r.segs.forEach(function (g) {
-      lines.push(kmTxt(g.endM) + ' km  ' + (tm() ? g.speed.toFixed(1) + ' km/h  ' : '') + E.fmtT(g.pace) + '/km  split ' + E.fmtT(g.time) + '  total ' + E.fmtT(g.cum));
+    var cur = currentView(tableViews(r));
+    lines.push(cur.label + ':');
+    E.windows(r, cur.len).forEach(function (g) {
+      lines.push(kmTxt(g.endM) + ' km  ' + (tm() ? g.speed.toFixed(1) + ' km/h  ' : '') + E.fmtT(g.pace) + '/km' + (g.mixed ? ' (avg)' : '') + '  time ' + E.fmtT(g.time) + '  total ' + E.fmtT(g.cum));
     });
     return lines.join('\n');
   }
@@ -434,6 +505,7 @@
     } else if (b.dataset.split) { st.splitM = +b.dataset.split; $('splitM').value = st.splitM; render(); }
     else if (b.dataset.goal) { st.goal = b.dataset.goal; setGoalFields(st.T); render(); }
     else if (b.dataset.mode) { st.mode = b.dataset.mode; render(); }
+    else if (b.dataset.tview) { st.tview = b.dataset.tview; render(); }
     else if (b.dataset.view) { st.view[b.dataset.card] = b.dataset.view; save(); updateCard(b.dataset.card); }
     else if (b.dataset.resetstrat) { delete st.sp[b.dataset.resetstrat]; ui.tuneOpen[b.dataset.resetstrat] = true; render(); }
     else if (b.closest('#strats')) {

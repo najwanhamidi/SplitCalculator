@@ -143,3 +143,9 @@ main > *, .card, .body { min-width: 0; }
 .grid2 > label { display: flex; flex-direction: column; justify-content: space-between; margin: 0; }
 .stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .stats dd small { display: block; font-size: .78rem; font-weight: 400; color: var(--ink3); }
+.seg.sm { grid-template-columns: none; grid-auto-flow: column; max-width: 100%; }
+#strats .sub-h { margin: 4px 0 8px; color: var(--ink2); font-weight: 600; font-size: .85rem; }
+#strats .chips { margin: 0 0 12px; }
+.strat button[aria-pressed=false] .dot { box-shadow: inset 0 0 0 2px var(--ink3); }
+.plan li.walk { border-style: dashed; }
+td small { color: var(--ink3); font-weight: 400; font-size: .75rem; }
