@@ -3,6 +3,7 @@
   'use strict';
 
   /* group: 'race' = race pacing profiles (from pacing research), 'workout' = common training-run formats */
+  const MP_IDS = ['mplong', 'mpfinish', 'mpbuild', 'mpintervals'];
   const STRATEGIES = [
     { id: 'even', group: 'race', name: 'Even pace', blurb: 'One steady pace from start to finish. Recent 5,000 m and 10,000 m world records were run close to this.' },
     { id: 'negative', group: 'race', name: 'Negative split', blurb: 'Run the second part faster than the first. Start controlled, finish strong.' },
@@ -19,8 +20,13 @@
     { id: 'tempo', group: 'workout', name: 'Tempo run', blurb: 'Easy warm-up, a sustained comfortably hard block, easy cool-down.' },
     { id: 'alternating', group: 'workout', name: 'Alternating', blurb: 'Easy and quick stretches take turns. Breaks up the monotony.' },
     { id: 'fartlek', group: 'workout', name: 'Fartlek', blurb: 'Speed play: surges of varied length and effort with easier running between. Change the pattern to reshuffle.' },
+    { id: 'pyramids', group: 'workout', name: 'Alternating pyramids', blurb: 'Several pyramids back to back. Each one builds to a fast peak and eases off; alternate flips every other pyramid so it dips slow in the middle.' },
     { id: 'pyramid', group: 'workout', name: 'Pyramid', blurb: 'Ease in, peak, ease out. The fastest splits sit around the peak point.' },
     { id: 'stairs', group: 'workout', name: 'Stair steps', blurb: 'Hold a pace for a block, then step faster. Each block is quicker than the last.' },
+    { id: 'mplong', group: 'marathon', mp: true, name: 'Marathon-pace block', blurb: 'Easy running with one block at your marathon pace. The easy parts adjust so the total still matches your goal.' },
+    { id: 'mpfinish', group: 'marathon', mp: true, name: 'Marathon-pace finish', blurb: 'Easy start, then the last stretch at marathon pace. A classic long-run finish.' },
+    { id: 'mpbuild', group: 'marathon', mp: true, name: 'Marathon pace to faster', blurb: 'Easy, then a marathon-pace block, then a faster finish. Practises moving up a gear on tired legs.' },
+    { id: 'mpintervals', group: 'marathon', mp: true, name: 'Marathon-pace repeats', blurb: 'Warm-up, repeated marathon-pace blocks with easy recoveries, then a cool-down.' },
     { id: 'interval', group: 'workout', name: 'Interval style', blurb: 'Easy warm-up, hard blocks with easy recoveries, easy cool-down.' },
     { id: 'ladder', group: 'workout', name: 'Ladder intervals', blurb: 'Hard reps get longer, then shorter (1-2-3-2-1 splits), with easy recoveries between.' },
     { id: 'surges', group: 'workout', name: 'Steady with surges', blurb: 'Steady running with a short surge at regular intervals. Practises changing gear.' },
@@ -35,7 +41,7 @@
     progressive: { v: 2 },
     positive: { v: 2 },
     alternating: { v: 2, len: 1 },
-    pyramid: { v: 2, peak: 50 },
+    pyramid: { v: 2, peak: 50, count: 1, alt: 0 },
     stairs: { v: 2, steps: 4 },
     interval: { v: 4, hard: 2, easy: 1, wu: 1, cd: 1 },
     ushape: { v: 2 },
@@ -51,7 +57,12 @@
     blocks3: { v: 3, a: 38, b: 38 },
     ladder: { v: 4, peak: 3, easy: 1, wu: 1, cd: 1 },
     surges: { v: 5, every: 4, len: 1 },
-    sandwich: { v: 5, wu: 15, mid: 15, cd: 10 }   // walk 60 s every 1.6 km at 9:00 /km
+    sandwich: { v: 5, wu: 15, mid: 15, cd: 10 },
+    pyramids: { v: 3, peak: 50, count: 3, alt: 1 },
+    mplong: { start: 25, len: 50 },
+    mpfinish: { len: 40 },
+    mpbuild: { easy: 30, mpl: 40, v: 4 },
+    mpintervals: { v: 3, wu: 3, blk: 5, rest: 1, cd: 2 }   // walk 60 s every 1.6 km at 9:00 /km
   };
   function params(id, sp) {
     return Object.assign({}, PARAM_DEFAULTS[id] || {}, (sp && sp[id]) || {});
@@ -60,8 +71,32 @@
   function buildSegments(totalM, splitM) { return segmentsFor('', totalM, splitM, {}); }
 
   /* Split boundaries every splitM, plus extra cut points for walk breaks (run-walk). */
+  /* Fixed-pace zones for marathon-pace templates: [startM, endM, role]. Roles: mp, fast, wu, cd, rec. */
+  function zonesFor(id, totalM, p) {
+    const z = [], f = totalM / 100;
+    if (id === 'mplong') z.push([p.start * f, Math.min(100, p.start + p.len) * f, 'mp']);
+    if (id === 'mpfinish') z.push([(100 - p.len) * f, totalM, 'mp']);
+    if (id === 'mpbuild') {
+      z.push([p.easy * f, Math.min(100, p.easy + p.mpl) * f, 'mp']);
+      if (p.easy + p.mpl < 100) z.push([(p.easy + p.mpl) * f, totalM, 'fast']);
+    }
+    if (id === 'mpintervals') {
+      const wu = Math.min(p.wu * 1000, totalM * 0.4), cd = Math.min(p.cd * 1000, totalM * 0.3), end = totalM - cd;
+      if (wu > 0) z.push([0, wu, 'wu']);
+      if (cd > 0) z.push([end, totalM, 'cd']);
+      let pos = wu;
+      while (pos < end - 1) {
+        z.push([pos, Math.min(pos + p.blk * 1000, end), 'mp']); pos += p.blk * 1000;
+        if (pos < end - 1) { z.push([pos, Math.min(pos + p.rest * 1000, end), 'rec']); pos += p.rest * 1000; }
+      }
+    }
+    return z;
+  }
+
   function segmentsFor(id, totalM, splitM, p) {
     const cuts = [0, totalM];
+    const zones = zonesFor(id, totalM, p);
+    zones.forEach(function (z) { cuts.push(z[0], z[1]); });
     for (let pos = splitM; pos < totalM - 0.5; pos += splitM) cuts.push(pos);
     const walks = [];
     if (id === 'runwalk') {
@@ -81,8 +116,10 @@
     const segs = [];
     for (let i = 1; i < pts.length; i++) {
       const a = pts[i - 1], b = pts[i], mid = (a + b) / 2;
+      const zone = zones.filter(function (z) { return mid > z[0] && mid < z[1]; })[0];
       segs.push({
         startM: a, endM: b, d: b - a,
+        role: zone ? zone[2] : '',
         walk: walks.some(function (w) { return mid > w[0] && mid < w[1]; })
       });
     }
@@ -137,17 +174,21 @@
     const fk = id === 'fartlek' ? fartlek(n, v, p.seed) : null;
     const lad = id === 'ladder' ? ladder(n, p) : null;
     return segs.map(function (s, i) {
-      if (s.walk) return 0;
+      if (s.walk || s.role === 'mp' || s.role === 'fast') return 0;
+      if (s.role === 'wu' || s.role === 'cd') return 1 + v;
       const x = (s.startM + s.d / 2) / totalM;
       switch (id) {
         case 'negative': return x < p.at / 100 ? 1 + v : 1 - v;
         case 'progressive': return 1 + v - 2 * v * x;
         case 'positive': return 1 - v + 2 * v * x;
         case 'alternating': return Math.floor(i / Math.max(1, p.len)) % 2 === 0 ? 1 + v : 1 - v;
-        case 'pyramid': {
+        case 'pyramid': case 'pyramids': {
           const pk = Math.min(0.95, Math.max(0.05, p.peak / 100));
-          const tri = x < pk ? x / pk : (1 - x) / (1 - pk);
-          return 1 + v - 2 * v * tri;
+          const cnt = Math.max(1, Math.round(p.count || 1));
+          const y = x * cnt, k = Math.min(cnt - 1, Math.floor(y)), xl = y - k;
+          const tri = xl < pk ? xl / pk : (1 - xl) / (1 - pk);
+          const sg = p.alt && k % 2 === 1 ? -1 : 1;
+          return 1 + sg * (v - 2 * v * tri);
         }
         case 'stairs': {
           const k = Math.min(Math.max(2, p.steps), n);
@@ -210,16 +251,22 @@
   */
   function plan(id, cfg) {
     const p = params(id, cfg.sp);
+    const mp = cfg.mp > 0 ? cfg.mp : 330;
     const totalM = Math.round(cfg.km * 1000);
     const segs = segmentsFor(id, totalM, cfg.splitM, p);
     const m = multipliers(id, segs, totalM, p);
+    segs.forEach(function (s) {
+      if (s.walk) s.fixedPace = p.wp;
+      else if (s.role === 'mp') s.fixedPace = mp;
+      else if (s.role === 'fast') s.fixedPace = mp * (1 - p.v / 100);
+    });
 
     // Optional race adjustments: easier first km, faster last km (in s/km on top of the profile).
     const win = Math.min(1000, totalM / 3);
     let add = segs.map(function (s) {
       const mid = s.startM + s.d / 2;
       let a = 0;
-      if (s.walk) return p.wp;   // walk breaks: fixed walking pace
+      if (s.fixedPace) return s.fixedPace;   // walk breaks and marathon-pace zones keep their own pace
       if (cfg.firstSlow && mid < win) a += cfg.firstSlow;
       if (cfg.kick && mid > totalM - win) a -= cfg.kick;
       return a;
@@ -227,7 +274,7 @@
     let num = cfg.T, den = 0;
     segs.forEach(function (s, i) { num -= s.d / 1000 * add[i]; den += s.d / 1000 * m[i]; });
     if (num < 0.3 * cfg.T) {
-      add = segs.map(function (s) { return s.walk ? p.wp : 0; });
+      add = segs.map(function (s) { return s.fixedPace || 0; });
       num = cfg.T; segs.forEach(function (s, i) { num -= s.d / 1000 * add[i]; });
     }
     const base = Math.max(num, 1) / Math.max(den, 1e-9);
@@ -240,7 +287,7 @@
     const blocks = [];
     segs.forEach(function (s) {
       let key = groupM ? Math.floor((s.startM + s.d / 2) / groupM) : blocks.length;
-      if (s.walk) key = 'w' + blocks.length;   // walk breaks never merge with running
+      if (s.fixedPace) key = 'f' + blocks.length;   // fixed-pace zones never merge with the rest
       const last = blocks[blocks.length - 1];
       if (last && last.key === key) last.segs.push(s); else blocks.push({ key: key, segs: [s] });
     });
@@ -249,11 +296,13 @@
     blocks.forEach(function (b) {
       let dist = 0, t = 0;
       b.segs.forEach(function (s) { dist += s.d / 1000; t += s.idealT; });
-      const want = t + (cfg.comp ? carry : 0);
-      const q = quantize(want, dist, cfg.treadmill, step);
-      carry = want - q.pace * dist;
+      const fixed = b.segs[0].fixedPace;
+      const want = t + (cfg.comp && !fixed ? carry : 0);
+      const q = quantize(want, dist, cfg.treadmill, fixed ? (cfg.treadmill ? 0.1 : 0) : step);   // fixed pace is never rounded beyond the belt's own grid
+      carry = fixed ? carry + (want - q.pace * dist) : want - q.pace * dist;
       b.segs.forEach(function (s) {
         s.pace = q.pace; s.speed = q.speed;
+        delete s.fixedPace;
         s.time = q.pace * s.d / 1000;
         s.startT = cum;
         cum += s.time;
@@ -267,6 +316,14 @@
       avgPace: cum / (totalM / 1000),
       fastest: Math.min.apply(null, paces), slowest: Math.max.apply(null, paces)
     };
+    res.base = base;
+    const w = [];
+    if (MP_IDS.indexOf(id) >= 0) {
+      const q = function (x) { return fmtT(x) + ' /km'; };
+      if (num <= 0 || base < mp - 0.5) w.push('To hit your goal, the easy parts would need ' + q(base) + ', faster than your marathon pace (' + q(mp) + '). Raise the goal time, shorten the marathon-pace part, or slow your marathon pace.');
+      else if (base > mp * 1.6) w.push('The easy parts would be very slow (' + q(base) + ') next to your marathon pace (' + q(mp) + '). Check the goal time and marathon pace.');
+    }
+    res.warn = w;
     res.half1 = timeAt(res, totalM / 2);
     res.half2 = cum - res.half1;
     return res;
@@ -331,8 +388,8 @@
     res.segs.forEach(function (s) {
       const label = treadmill ? s.speed.toFixed(1) : fmtT(s.pace);
       const last = out[out.length - 1];
-      if (last && last.label === label && !!last.walk === !!s.walk) { last.endM = s.endM; last.endT = s.cum; }
-      else out.push({ label: label, walk: s.walk, startM: s.startM, endM: s.endM, startT: s.startT, endT: s.cum });
+      if (last && last.label === label && !!last.walk === !!s.walk && last.role === s.role) { last.endM = s.endM; last.endT = s.cum; }
+      else out.push({ label: label, walk: s.walk, role: s.role, startM: s.startM, endM: s.endM, startT: s.startT, endT: s.cum });
     });
     return out;
   }
@@ -350,7 +407,7 @@
     const rows = runs(res, true).map(function (x, i) {
       const speed = +x.label;
       const dur = Math.round(x.endT) - Math.round(x.startT);
-      const msg = 'Interval ' + (i + 1) + (x.walk ? ' walk' : '') + ' (' + fmtKm(x.startM) + '-' + fmtKm(x.endM) + ' km)';
+      const msg = 'Interval ' + (i + 1) + (x.walk ? ' walk' : '') + (x.role === 'mp' ? ' MP' : '') + ' (' + fmtKm(x.startM) + '-' + fmtKm(x.endM) + ' km)';
       return { dur: dur, speed: speed, msg: msg };
     }).filter(function (r) { return r.dur > 0; });
     let xml = '<?xml version="1.0" encoding="UTF-8"?>\n<rows device="treadmill">\n';
@@ -363,7 +420,7 @@
   }
 
   const api = { qzWorkout: qzWorkout,
-    STRATEGIES: STRATEGIES, PARAM_DEFAULTS: PARAM_DEFAULTS, params: params, plan: plan, timeAt: timeAt,
+    STRATEGIES: STRATEGIES, MP_IDS: MP_IDS, PARAM_DEFAULTS: PARAM_DEFAULTS, params: params, plan: plan, timeAt: timeAt,
     checkpoints: checkpoints, windows: windows, fmtT: fmtT, fmtSigned: fmtSigned, fmtKm: fmtKm, runs: runs, buildSegments: buildSegments
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

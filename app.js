@@ -11,7 +11,7 @@
     sp: {},      // per-strategy settings
     view: {},    // per-card chart view: 'pace' | 'bank'
     tview: 'split', // table rows: 'split' | 'km' | '5k'
-    incline: 0,
+    incline: 0, mp: 330,
     slots: {}    // strategy -> colour slot 1..8, kept while selected
   };
   var STRATS = E.STRATEGIES;
@@ -33,8 +33,33 @@
       { k: 'len', label: 'Switch every', min: 1, max: 5, step: 1, fmt: function (v) { return v + (v > 1 ? ' splits' : ' split'); } }
     ],
     pyramid: [
-      { k: 'v', label: 'Pace swing', min: 0.5, max: 8, step: 0.5, fmt: function (v) { return '±' + v + '%'; } },
-      { k: 'peak', label: 'Fastest at', min: 20, max: 80, step: 5, fmt: function (v) { return v + '% of distance'; } }
+      { k: 'v', label: 'Pace swing', min: 0.5, max: 8, step: 0.5, fmt: SW },
+      { k: 'peak', label: 'Fastest at', min: 20, max: 80, step: 5, fmt: PCT },
+      { k: 'count', label: 'Pyramids', min: 1, max: 8, step: 1, fmt: function (v) { return v; } },
+      { k: 'alt', label: 'Alternate direction', min: 0, max: 1, step: 1, fmt: function (v) { return +v ? 'on' : 'off'; } }
+    ],
+    pyramids: [
+      { k: 'v', label: 'Pace swing', min: 0.5, max: 8, step: 0.5, fmt: SW },
+      { k: 'count', label: 'Pyramids', min: 1, max: 8, step: 1, fmt: function (v) { return v; } },
+      { k: 'peak', label: 'Fastest at', min: 20, max: 80, step: 5, fmt: function (v) { return v + '% into each'; } },
+      { k: 'alt', label: 'Alternate direction', min: 0, max: 1, step: 1, fmt: function (v) { return +v ? 'on' : 'off'; } }
+    ],
+    mplong: [
+      { k: 'start', label: 'Marathon pace starts at', min: 0, max: 80, step: 5, fmt: PCT },
+      { k: 'len', label: 'Marathon-pace length', min: 10, max: 90, step: 5, fmt: PCT }
+    ],
+    mpfinish: [{ k: 'len', label: 'Marathon pace for the last', min: 10, max: 90, step: 5, fmt: PCT }],
+    mpbuild: [
+      { k: 'easy', label: 'Easy start', min: 5, max: 60, step: 5, fmt: PCT },
+      { k: 'mpl', label: 'Marathon-pace block', min: 10, max: 70, step: 5, fmt: PCT },
+      { k: 'v', label: 'Faster finish by', min: 1, max: 10, step: 0.5, fmt: function (v) { return v + '% vs MP'; } }
+    ],
+    mpintervals: [
+      { k: 'blk', label: 'MP block', min: 0.5, max: 15, step: 0.5, fmt: function (v) { return v + ' km'; } },
+      { k: 'rest', label: 'Easy recovery', min: 0.5, max: 5, step: 0.5, fmt: function (v) { return v + ' km'; } },
+      { k: 'wu', label: 'Warm-up', min: 0, max: 10, step: 0.5, fmt: function (v) { return v + ' km'; } },
+      { k: 'cd', label: 'Cool-down', min: 0, max: 10, step: 0.5, fmt: function (v) { return v + ' km'; } },
+      { k: 'v', label: 'Warm-up/cool-down slower by', min: 0, max: 10, step: 0.5, fmt: function (v) { return v + '%'; } }
     ],
     stairs: [
       { k: 'v', label: 'Pace swing', min: 0.5, max: 8, step: 0.5, fmt: function (v) { return '±' + v + '%'; } },
@@ -162,7 +187,7 @@
   function cfg() {
     return {
       km: st.km, T: targetSec(), treadmill: tm(), round: st.round, paceStep: st.paceStep, speedStep: st.speedStep,
-      group: st.group, comp: st.comp, splitM: st.splitM, sp: st.sp, firstSlow: st.firstSlow, kick: st.kick
+      group: st.group, comp: st.comp, splitM: st.splitM, sp: st.sp, mp: st.mp, firstSlow: st.firstSlow, kick: st.kick
     };
   }
 
@@ -174,14 +199,20 @@
     $('paceStep').value = st.paceStep; $('speedStep').value = st.speedStep; $('group').value = st.group;
     $('incline').value = st.incline; $('firstSlow').value = st.firstSlow; $('kick').value = st.kick;
     var box = $('strats'), html = '';
-    [['race', 'Race pacing'], ['workout', 'Workouts']].forEach(function (g) {
-      html += '<h3 class="sub-h">' + g[1] + '</h3><div class="chips strat" role="group" aria-label="' + g[1] + '">';
+    [['race', 'Race pacing'], ['workout', 'Workouts'], ['marathon', 'Marathon-pace templates']].forEach(function (g) {
+      html += '<h3 class="sub-h">' + g[1] + '</h3>';
+      if (g[0] === 'marathon') html += '<div class="mpbox"><span class="lbl" id="l-mp">Your target marathon pace</span><div class="time two">' +
+        '<label><input id="mpm" type="number" inputmode="numeric" min="2" max="15" aria-label="Marathon pace minutes"><span>min</span></label>' +
+        '<label><input id="mps" type="number" inputmode="numeric" min="0" max="59" placeholder="0" aria-label="Marathon pace seconds"><span>sec /km</span></label></div>' +
+        '<p class="hint" id="mpOut"></p><p class="hint">These parts keep exactly this pace. The easy parts adjust so the whole run still matches your distance and goal time.</p></div>';
+      html += '<div class="chips strat" role="group" aria-label="' + g[1] + '">';
       STRATS.forEach(function (s) {
         if (s.group === g[0]) html += '<button type="button" data-id="' + s.id + '"><span class="dot"></span>' + s.name + '</button>';
       });
       html += '</div>';
     });
     box.innerHTML = html;
+    $('mpm').value = Math.floor(st.mp / 60); $('mps').value = Math.round(st.mp % 60) || '';
     syncUi();
   }
   /* Show the goal in all three forms. The goal time st.T stays the source of truth. */
@@ -207,6 +238,7 @@
     $('stepLbl').textContent = tm() ? 'Round speed to nearest' : 'Round pace to nearest';
     $('tmHint').hidden = !(tm() && !st.round);
     $('compWrap').hidden = !(st.round || tm());
+    $('mpOut').textContent = 'Marathon at this pace: ' + E.fmtT(st.mp * 42.195) + ' · ' + (3600 / st.mp).toFixed(1) + ' km/h';
     $('firstOut').textContent = st.firstSlow; $('kickOut').textContent = st.kick;
   }
   function num(id, def) { var v = parseFloat($(id).value); return isFinite(v) ? v : def; }
@@ -217,6 +249,7 @@
     st.paceStep = +$('paceStep').value; st.speedStep = +$('speedStep').value; st.group = +$('group').value;
     st.firstSlow = +$('firstSlow').value; st.kick = +$('kick').value;
     st.incline = Math.min(15, Math.max(0, num('incline', 0)));
+    st.mp = Math.max(120, num('mpm', 0) * 60 + num('mps', 0));
   }
 
   /* ---------- rendering ---------- */
@@ -318,7 +351,7 @@
     var halfNote = Math.abs(hd) < 0.5 ? 'even halves' : (hd < 0 ? 'negative by ' : 'positive by ') + E.fmtT(Math.abs(hd));
 
     var runs = E.runs(r, tm()).map(function (x) {
-      return '<li' + (x.walk ? ' class="walk"' : '') + '>' + kmTxt(x.startM) + '–' + kmTxt(x.endM) + ' km · ' + (x.walk ? 'walk ' : '') + '<b>' + x.label + '</b> ' + unit() + ' · until ' + E.fmtT(x.endT) + '</li>';
+      return '<li' + (x.walk ? ' class="walk"' : (x.role === 'mp' ? ' class="mpr"' : '')) + '>' + kmTxt(x.startM) + '–' + kmTxt(x.endM) + ' km · ' + (x.walk ? 'walk ' : '') + (x.role === 'mp' ? 'MP ' : '') + '<b>' + x.label + '</b> ' + unit() + ' · until ' + E.fmtT(x.endT) + '</li>';
     }).join('');
     var cps = E.checkpoints(r);
     var cpHtml = cps.length ? '<div class="cp"><h4>Checkpoints</h4><ul class="plan">' + cps.map(function (c) {
@@ -346,9 +379,11 @@
       return '<button type="button" role="radio" data-tview="' + v.k + '" aria-checked="' + (v.k === cur.k) + '">' + v.label + '</button>';
     }).join('') + '</div>' : '';
 
-    return '<dl class="stats">' +
+    var warn = (r.warn || []).map(function (w) { return '<p class="warn" role="note">' + esc(w) + '</p>'; }).join('');
+    var easy = E.MP_IDS.indexOf(id) >= 0 && !r.warn.length ? stat('Easy parts', pv(r.base)) : '';
+    return warn + '<dl class="stats">' +
       stat('Finish', E.fmtT(r.finish)) + stat('Vs goal', delta) + stat('Average', pv(r.avgPace)) +
-      stat('Fastest', pv(r.fastest)) + stat('Slowest', pv(r.slowest)) +
+      stat('Fastest', pv(r.fastest)) + stat('Slowest', pv(r.slowest)) + easy +
       stat('Halves', E.fmtT(r.half1) + ' / ' + E.fmtT(r.half2) + '<small>' + halfNote + '</small>') + '</dl>' +
       '<h4 class="plan-h">Pace plan</h4><ul class="plan" aria-label="Pace plan">' + runs + '</ul>' + cpHtml +
       '<div class="seg sm" role="radiogroup" aria-label="Chart view">' +

@@ -4,7 +4,9 @@ A mobile-friendly web app (installable PWA, works offline) that turns a distance
 
 **Race pacing** (pacing profiles described in sports-science research): even pace, negative split, fast start (positive split), U-shaped, J-shaped, reverse J, controlled start, sit and kick, mid-race surge, and a three-block plan (e.g. 10-10-10 marathon).
 
-**Workouts**: progression run, fast-finish long run, tempo run, alternating, fartlek, pyramid, stair steps, interval style, ladder intervals, steady with surges, tempo sandwich, and run-walk (Galloway-style walk breaks at a set walking pace).
+**Marathon-pace templates** (set your target marathon pace; those parts keep exactly that pace and the easy parts adjust so distance and goal time still match): marathon-pace block, marathon-pace finish, marathon pace to faster, and marathon-pace repeats. A warning appears if the goal can't fit, e.g. it would need the easy parts faster than marathon pace.
+
+**Workouts**: alternating pyramids (any number of pyramids, optionally flipping direction each time), progression run, fast-finish long run, tempo run, alternating, fartlek, pyramid, stair steps, interval style, ladder intervals, steady with surges, tempo sandwich, and run-walk (Galloway-style walk breaks at a set walking pace).
 
 **Setup**
 - Goal as finish time, average pace or average speed. Switching between them keeps the same goal.

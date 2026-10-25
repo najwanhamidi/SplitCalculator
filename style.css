@@ -152,3 +152,13 @@ td small { color: var(--ink3); font-weight: 400; font-size: .75rem; }
 .tune.export { margin-top: 12px; }
 .tune.export .actions { margin-top: 4px; }
 #expOpts input { max-width: 160px; }
+.mpbox { margin: 0 0 12px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); }
+.mpbox .time { margin-bottom: 8px; }
+.mpbox .hint { margin: 0 0 4px; }
+.warn { margin: 0 0 12px; padding: 10px 12px; border: 1px solid var(--s8); border-radius: 8px; font-size: .9rem; }
+.plan li.mpr { border-color: var(--ink); }
+.mpbox { margin: 0 0 12px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); }
+.mpbox .time { margin-bottom: 8px; }
+.mpbox .hint { margin: 0 0 4px; }
+.warn { margin: 0 0 12px; padding: 10px 12px; border: 1px solid var(--s8); border-radius: 8px; font-size: .9rem; }
+.plan li.mpr { border-color: var(--ink); }
