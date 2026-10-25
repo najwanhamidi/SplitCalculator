@@ -45,8 +45,10 @@
       { k: 'alt', label: 'Alternate direction', min: 0, max: 1, step: 1, fmt: function (v) { return +v ? 'on' : 'off'; } }
     ],
     mplong: [
-      { k: 'start', label: 'Marathon pace starts at', min: 0, max: 80, step: 5, fmt: PCT },
-      { k: 'len', label: 'Marathon-pace length', min: 10, max: 90, step: 5, fmt: PCT }
+      { k: 'n', label: 'Marathon-pace blocks', min: 1, max: 8, step: 1, fmt: function (v) { return v; } },
+      { k: 'start', label: 'MP stretch starts at', min: 0, max: 80, step: 5, fmt: PCT },
+      { k: 'len', label: 'MP stretch length', min: 10, max: 90, step: 5, fmt: PCT },
+      { k: 'rest', label: 'Easy gap between blocks', min: 0.5, max: 5, step: 0.5, fmt: function (v) { return v + ' km'; } }
     ],
     mpfinish: [{ k: 'len', label: 'Marathon pace for the last', min: 10, max: 90, step: 5, fmt: PCT }],
     mpbuild: [
@@ -55,85 +57,12 @@
       { k: 'v', label: 'Faster finish by', min: 1, max: 10, step: 0.5, fmt: function (v) { return v + '% vs MP'; } }
     ],
     mpintervals: [
-      { k: 'blk', label: 'MP block', min: 0.5, max: 15, step: 0.5, fmt: function (v) { return v + ' km'; } },
+      { k: 'n', label: 'Marathon-pace blocks', min: 1, max: 10, step: 1, fmt: function (v) { return v; } },
+      { k: 'blk', label: 'Block length', min: 0, max: 15, step: 0.5, fmt: function (v) { return +v === 0 ? 'auto (fills the run)' : v + ' km'; } },
       { k: 'rest', label: 'Easy recovery', min: 0.5, max: 5, step: 0.5, fmt: function (v) { return v + ' km'; } },
       { k: 'wu', label: 'Warm-up', min: 0, max: 10, step: 0.5, fmt: function (v) { return v + ' km'; } },
       { k: 'cd', label: 'Cool-down', min: 0, max: 10, step: 0.5, fmt: function (v) { return v + ' km'; } },
       { k: 'v', label: 'Warm-up/cool-down slower by', min: 0, max: 10, step: 0.5, fmt: function (v) { return v + '%'; } }
-    ],
-    stairs: [
-      { k: 'v', label: 'Pace swing', min: 0.5, max: 8, step: 0.5, fmt: function (v) { return '±' + v + '%'; } },
-      { k: 'steps', label: 'Steps', min: 2, max: 8, step: 1, fmt: function (v) { return v; } }
-    ],
-    interval: [
-      { k: 'v', label: 'Hard vs easy', min: 1, max: 12, step: 0.5, fmt: function (v) { return '±' + v + '%'; } },
-      { k: 'hard', label: 'Hard', min: 1, max: 10, step: 1, fmt: function (v) { return v + (v > 1 ? ' splits' : ' split'); } },
-      { k: 'easy', label: 'Easy', min: 1, max: 10, step: 1, fmt: function (v) { return v + (v > 1 ? ' splits' : ' split'); } },
-      { k: 'wu', label: 'Warm-up', min: 0, max: 5, step: 1, fmt: function (v) { return v + (v === 1 ? ' split' : ' splits'); } },
-      { k: 'cd', label: 'Cool-down', min: 0, max: 5, step: 1, fmt: function (v) { return v + (v === 1 ? ' split' : ' splits'); } }
-    ],
-    ushape: [{ k: 'v', label: 'Pace swing', min: 0.5, max: 8, step: 0.5, fmt: SW }],
-    jshape: [
-      { k: 'v', label: 'Pace swing', min: 0.5, max: 8, step: 0.5, fmt: SW },
-      { k: 'low', label: 'Slowest at', min: 25, max: 75, step: 5, fmt: PCT }
-    ],
-    revj: [
-      { k: 'v', label: 'Pace swing', min: 0.5, max: 8, step: 0.5, fmt: SW },
-      { k: 'low', label: 'Slowest at', min: 25, max: 75, step: 5, fmt: PCT }
-    ],
-    fastfinish: [
-      { k: 'v', label: 'Pace swing', min: 1, max: 10, step: 0.5, fmt: SW },
-      { k: 'last', label: 'Fast for the last', min: 5, max: 50, step: 5, fmt: PCT }
-    ],
-    tempo: [
-      { k: 'v', label: 'Easy vs tempo', min: 2, max: 15, step: 0.5, fmt: SW },
-      { k: 'wu', label: 'Warm-up', min: 0, max: 40, step: 5, fmt: PCT },
-      { k: 'cd', label: 'Cool-down', min: 0, max: 40, step: 5, fmt: PCT }
-    ],
-    fartlek: [
-      { k: 'v', label: 'Surge size', min: 1, max: 12, step: 0.5, fmt: SW },
-      { k: 'seed', label: 'Pattern', min: 1, max: 30, step: 1, fmt: function (v) { return '#' + v; } }
-    ],
-    runwalk: [
-      { k: 'every', label: 'Walk every', min: 0.4, max: 5, step: 0.1, fmt: function (v) { return (+v).toFixed(1) + ' km'; } },
-      { k: 'ws', label: 'Walk for', min: 15, max: 180, step: 5, fmt: function (v) { return v + ' s'; } },
-      { k: 'wp', label: 'Walking pace', min: 420, max: 960, step: 15, fmt: function (v) { return E.fmtT(v) + ' /km'; } }
-    ],
-    controlled: [
-      { k: 'v', label: 'Slower by', min: 0.5, max: 8, step: 0.5, fmt: function (v) { return v + '%'; } },
-      { k: 'first', label: 'Hold back for the first', min: 5, max: 40, step: 5, fmt: PCT }
-    ],
-    sitkick: [
-      { k: 'v', label: 'Kick faster by', min: 1, max: 15, step: 0.5, fmt: function (v) { return v + '%'; } },
-      { k: 'last', label: 'Kick for the last', min: 2, max: 25, step: 1, fmt: PCT }
-    ],
-    midsurge: [
-      { k: 'v', label: 'Surge faster by', min: 1, max: 10, step: 0.5, fmt: function (v) { return v + '%'; } },
-      { k: 'at', label: 'Centred at', min: 20, max: 80, step: 5, fmt: PCT },
-      { k: 'len', label: 'Surge length', min: 5, max: 40, step: 5, fmt: PCT }
-    ],
-    blocks3: [
-      { k: 'v', label: 'Block swing', min: 0.5, max: 8, step: 0.5, fmt: SW },
-      { k: 'a', label: 'Easy block', min: 10, max: 60, step: 1, fmt: PCT },
-      { k: 'b', label: 'Goal-pace block', min: 10, max: 60, step: 1, fmt: PCT }
-    ],
-    ladder: [
-      { k: 'v', label: 'Hard vs easy', min: 1, max: 12, step: 0.5, fmt: SW },
-      { k: 'peak', label: 'Longest rep', min: 2, max: 6, step: 1, fmt: function (v) { return v + (v == 1 ? ' split' : ' splits'); } },
-      { k: 'easy', label: 'Recovery', min: 1, max: 4, step: 1, fmt: function (v) { return v + (v == 1 ? ' split' : ' splits'); } },
-      { k: 'wu', label: 'Warm-up', min: 0, max: 5, step: 1, fmt: function (v) { return v + (v == 1 ? ' split' : ' splits'); } },
-      { k: 'cd', label: 'Cool-down', min: 0, max: 5, step: 1, fmt: function (v) { return v + (v == 1 ? ' split' : ' splits'); } }
-    ],
-    surges: [
-      { k: 'v', label: 'Surge faster by', min: 1, max: 12, step: 0.5, fmt: function (v) { return v + '%'; } },
-      { k: 'every', label: 'Surge every', min: 2, max: 10, step: 1, fmt: function (v) { return v + (v == 1 ? ' split' : ' splits'); } },
-      { k: 'len', label: 'Surge length', min: 1, max: 3, step: 1, fmt: function (v) { return v + (v == 1 ? ' split' : ' splits'); } }
-    ],
-    sandwich: [
-      { k: 'v', label: 'Easy vs tempo', min: 2, max: 15, step: 0.5, fmt: SW },
-      { k: 'wu', label: 'Warm-up', min: 0, max: 30, step: 5, fmt: PCT },
-      { k: 'mid', label: 'Recovery between', min: 5, max: 40, step: 5, fmt: PCT },
-      { k: 'cd', label: 'Cool-down', min: 0, max: 30, step: 5, fmt: PCT }
     ]
   };
 
@@ -379,7 +308,8 @@
       return '<button type="button" role="radio" data-tview="' + v.k + '" aria-checked="' + (v.k === cur.k) + '">' + v.label + '</button>';
     }).join('') + '</div>' : '';
 
-    var warn = (r.warn || []).map(function (w) { return '<p class="warn" role="note">' + esc(w) + '</p>'; }).join('');
+    var notes = (r.notes || []).map(function (w) { return '<p class="note">' + esc(w) + '</p>'; }).join('');
+    var warn = notes + (r.warn || []).map(function (w) { return '<p class="warn" role="note">' + esc(w) + '</p>'; }).join('');
     var easy = E.MP_IDS.indexOf(id) >= 0 && !r.warn.length ? stat('Easy parts', pv(r.base)) : '';
     return warn + '<dl class="stats">' +
       stat('Finish', E.fmtT(r.finish)) + stat('Vs goal', delta) + stat('Average', pv(r.avgPace)) +

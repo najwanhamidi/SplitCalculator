@@ -37,7 +37,6 @@ const rw = E.plan('runwalk', base);
 console.log('runwalk runs:', E.runs(rw, false).map(r => (r.walk ? 'walk ' : '') + E.fmtKm(r.startM) + '-' + E.fmtKm(r.endM) + '@' + r.label).join(' | '));
 console.log('runwalk per km:', E.windows(rw, 1000).map(w => E.fmtT(w.pace) + (w.mixed ? '*' : '')).join(' '));
 console.log('400m split per km:', E.windows(E.plan('alternating', { ...base, splitM: 400 }), 1000).map(w => E.fmtT(w.pace) + (w.mixed ? '*' : '')).join(' '));
-console.log(bad ? 'FAILURES ' + bad : 'ALL OK');
 for (const id of ['controlled', 'sitkick', 'midsurge', 'blocks3', 'ladder', 'surges', 'sandwich']) console.log(id.padEnd(11), show(id, { km: 15, T: 15 * 306 }));
 console.log('ladder 400m:', E.plan('ladder', { ...base, splitM: 400 }).segs.map(s => s.pace < 300 ? 'H' : 'e').join(''));
 // QZ workout export
@@ -67,4 +66,25 @@ const py = E.plan('pyramids', { ...base, km: 12, splitM: 1000 });
 console.log('pyramids x3 alt:', py.segs.map(s => E.fmtT(s.pace)).join(' '));
 const p1 = E.plan('pyramid', { ...base, km: 12, sp: { pyramid: { count: 2, alt: 0 } } });
 console.log('pyramid x2:', p1.segs.map(s => E.fmtT(s.pace)).join(' '));
+console.log(bad ? 'FAILURES ' + bad : 'ALL OK');
+
+// MP block layouts fill the distance with no slivers, for any block count
+for (const km of [10, 21.0975, 24.5, 30, 42.195]) {
+  for (const n of [1, 2, 3, 5, 8]) {
+    for (const id of ['mpintervals', 'mplong']) {
+      const r = E.plan(id, { ...base, km, T: km * 380, mp: 330, splitM: 1000, sp: { [id]: { n } } });
+      chk(Math.abs(r.finish - km * 380) < 1e-6, id + ' total ' + km + '/' + n);
+      const zs = []; // contiguous role runs
+      r.segs.forEach(x => { const l = zs[zs.length - 1]; if (l && l.role === x.role) l.end = x.endM; else zs.push({ role: x.role, start: x.startM, end: x.endM }); });
+      chk(zs.filter(z => z.role === 'mp').length >= 1 && zs.filter(z => z.role === 'mp').length <= n, id + ' mp count');
+      for (const z of zs) chk(z.end - z.start >= 99, id + ' no sliver ' + z.role + ' ' + (z.end - z.start) + ' @' + km + '/' + n);
+    }
+  }
+}
+const ex = E.plan('mpintervals', { ...base, km: 24.5, T: 24.5 * 340, mp: 275, treadmill: true, speedStep: 0.1 });
+console.log('24.5 km, 3 blocks:', ex.notes.join(' '), '\n ', E.runs(ex, true).map(x => (x.role || 'easy') + ' ' + E.fmtKm(x.startM) + '-' + E.fmtKm(x.endM) + '@' + x.label).join(' | '));
+const e5 = E.plan('mpintervals', { ...base, km: 10, T: 3300, sp: { mpintervals: { n: 6, rest: 1.5 } } });
+console.log('10 km, 6 blocks asked:', e5.notes.join(' '));
+const ml = E.plan('mplong', { ...base, km: 30, T: 3 * 3600, sp: { mplong: { n: 3, rest: 1, start: 20, len: 60 } } });
+console.log('mplong 3 blocks:', ml.notes.join(' '), E.runs(ml, false).map(x => (x.role || 'easy') + ' ' + E.fmtKm(x.startM) + '-' + E.fmtKm(x.endM)).join(' | '));
 console.log(bad ? 'FAILURES ' + bad : 'ALL OK');

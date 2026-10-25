@@ -50,7 +50,7 @@
     fastfinish: { v: 3, last: 25 },
     tempo: { v: 5, wu: 20, cd: 15 },
     fartlek: { v: 3, seed: 1 },
-    runwalk: { every: 1.6, ws: 60, wp: 540 },
+    runwalk: { every: 1.6, ws: 60, wp: 540 },   // walk 60 s every 1.6 km at 9:00 /km
     controlled: { v: 3, first: 15 },
     sitkick: { v: 6, last: 8 },
     midsurge: { v: 3, at: 50, len: 15 },
@@ -59,10 +59,10 @@
     surges: { v: 5, every: 4, len: 1 },
     sandwich: { v: 5, wu: 15, mid: 15, cd: 10 },
     pyramids: { v: 3, peak: 50, count: 3, alt: 1 },
-    mplong: { start: 25, len: 50 },
+    mplong: { start: 25, len: 50, n: 1, rest: 1 },
     mpfinish: { len: 40 },
     mpbuild: { easy: 30, mpl: 40, v: 4 },
-    mpintervals: { v: 3, wu: 3, blk: 5, rest: 1, cd: 2 }   // walk 60 s every 1.6 km at 9:00 /km
+    mpintervals: { v: 0, n: 3, blk: 0, rest: 1, wu: 3, cd: 2 }
   };
   function params(id, sp) {
     return Object.assign({}, PARAM_DEFAULTS[id] || {}, (sp && sp[id]) || {});
@@ -72,30 +72,69 @@
 
   /* Split boundaries every splitM, plus extra cut points for walk breaks (run-walk). */
   /* Fixed-pace zones for marathon-pace templates: [startM, endM, role]. Roles: mp, fast, wu, cd, rec. */
+  /* Lay out n marathon-pace blocks (with easy recoveries between) so they always fill the space exactly:
+     no leftover slivers. Block length is "auto" (0) or fixed; warm-up and cool-down take whatever remains. */
+  function mpBlocks(T, n, rest, blk, wu, cd) {
+    const notes = [];
+    n = Math.max(1, Math.round(n)); rest = Math.max(0, rest); wu = Math.max(0, wu); cd = Math.max(0, cd);
+    const minBlk = 0.5;
+    let b = blk > 0 ? blk : 0;
+    const asked = n;
+    if (b > 0) {
+      while (n > 1 && n * b + (n - 1) * rest > T) n--;
+      if (n * b + (n - 1) * rest > T) b = T;
+      const left = Math.max(0, T - n * b - (n - 1) * rest), r = wu + cd > 0 ? wu / (wu + cd) : 0.5;
+      wu = left * r; cd = left - wu;
+    } else {
+      while (n > 1 && T - (n - 1) * rest - n * minBlk < 0) n--;
+      const room = Math.max(0, T - (n - 1) * rest - n * minBlk);
+      if (wu + cd > room) { const k = wu + cd > 0 ? room / (wu + cd) : 0; wu *= k; cd *= k; }
+      b = (T - (n - 1) * rest - wu - cd) / n;
+    }
+    if (n < asked) notes.push('Only ' + n + ' block' + (n > 1 ? 's' : '') + ' fit in this distance.');
+    return { n: n, blk: b, rest: rest, wu: wu, cd: cd, notes: notes };
+  }
+
+  /* Fixed-pace zones for marathon-pace templates: [startM, endM, role]. Roles: mp, fast, wu, cd, rec. */
   function zonesFor(id, totalM, p) {
-    const z = [], f = totalM / 100;
-    if (id === 'mplong') z.push([p.start * f, Math.min(100, p.start + p.len) * f, 'mp']);
+    const z = [], f = totalM / 100, notes = [];
+    if (id === 'mplong') {
+      // n MP blocks spread over the chosen stretch, easy gaps between them
+      const a = p.start * f, L = Math.min(100 - p.start, p.len) * f / 1000;
+      const L1 = Math.max(L, 0.1);
+      const lay = mpBlocks(L1, p.n, p.rest, 0, 0, 0);
+      notes.push.apply(notes, lay.notes);
+      let pos = a;
+      for (let i = 0; i < lay.n; i++) {
+        z.push([pos, pos + lay.blk * 1000, 'mp']); pos += lay.blk * 1000;
+        if (i < lay.n - 1) { z.push([pos, pos + lay.rest * 1000, 'rec']); pos += lay.rest * 1000; }
+      }
+      if (lay.n > 1) notes.push(lay.n + ' marathon-pace blocks of ' + (Math.round(lay.blk * 10) / 10) + ' km, ' + lay.rest + ' km easy between.');
+    }
     if (id === 'mpfinish') z.push([(100 - p.len) * f, totalM, 'mp']);
     if (id === 'mpbuild') {
       z.push([p.easy * f, Math.min(100, p.easy + p.mpl) * f, 'mp']);
       if (p.easy + p.mpl < 100) z.push([(p.easy + p.mpl) * f, totalM, 'fast']);
     }
     if (id === 'mpintervals') {
-      const wu = Math.min(p.wu * 1000, totalM * 0.4), cd = Math.min(p.cd * 1000, totalM * 0.3), end = totalM - cd;
-      if (wu > 0) z.push([0, wu, 'wu']);
-      if (cd > 0) z.push([end, totalM, 'cd']);
-      let pos = wu;
-      while (pos < end - 1) {
-        z.push([pos, Math.min(pos + p.blk * 1000, end), 'mp']); pos += p.blk * 1000;
-        if (pos < end - 1) { z.push([pos, Math.min(pos + p.rest * 1000, end), 'rec']); pos += p.rest * 1000; }
+      const lay = mpBlocks(totalM / 1000, p.n, p.rest, p.blk, p.wu, p.cd);
+      notes.push.apply(notes, lay.notes);
+      let pos = 0;
+      if (lay.wu > 0.001) { z.push([0, lay.wu * 1000, 'wu']); pos = lay.wu * 1000; }
+      for (let i = 0; i < lay.n; i++) {
+        z.push([pos, pos + lay.blk * 1000, 'mp']); pos += lay.blk * 1000;
+        if (i < lay.n - 1) { z.push([pos, pos + lay.rest * 1000, 'rec']); pos += lay.rest * 1000; }
       }
+      if (lay.cd > 0.001) z.push([pos, totalM, 'cd']);
+      notes.push(lay.n + ' marathon-pace block' + (lay.n > 1 ? 's' : '') + ' of ' + (Math.round(lay.blk * 10) / 10) + ' km' + (lay.n > 1 ? ', ' + lay.rest + ' km easy between' : '') +
+        '; warm-up ' + (Math.round(lay.wu * 10) / 10) + ' km, cool-down ' + (Math.round(lay.cd * 10) / 10) + ' km.');
     }
-    return z;
+    return { zones: z, notes: notes };
   }
 
   function segmentsFor(id, totalM, splitM, p) {
     const cuts = [0, totalM];
-    const zones = zonesFor(id, totalM, p);
+    const zones = zonesFor(id, totalM, p).zones;
     zones.forEach(function (z) { cuts.push(z[0], z[1]); });
     for (let pos = splitM; pos < totalM - 0.5; pos += splitM) cuts.push(pos);
     const walks = [];
@@ -324,6 +363,7 @@
       else if (base > mp * 1.6) w.push('The easy parts would be very slow (' + q(base) + ') next to your marathon pace (' + q(mp) + '). Check the goal time and marathon pace.');
     }
     res.warn = w;
+    res.notes = MP_IDS.indexOf(id) >= 0 ? zonesFor(id, totalM, p).notes : [];
     res.half1 = timeAt(res, totalM / 2);
     res.half2 = cum - res.half1;
     return res;
