@@ -133,6 +133,7 @@
       if (g[0] === 'marathon') html += '<div class="mpbox"><span class="lbl" id="l-mp">Your target marathon pace</span><div class="time two">' +
         '<label><input id="mpm" type="number" inputmode="numeric" min="2" max="15" aria-label="Marathon pace minutes"><span>min</span></label>' +
         '<label><input id="mps" type="number" inputmode="numeric" min="0" max="59" placeholder="0" aria-label="Marathon pace seconds"><span>sec /km</span></label></div>' +
+        '<div class="time one" id="mpSpeed" hidden><label><input id="mpk" type="number" inputmode="decimal" step="0.1" min="4" max="30" aria-label="Marathon speed in km per hour"><span>km/h</span></label></div>' +
         '<p class="hint" id="mpOut"></p><p class="hint">These parts keep exactly this pace. The easy parts adjust so the whole run still matches your distance and goal time.</p></div>';
       html += '<div class="chips strat" role="group" aria-label="' + g[1] + '">';
       STRATS.forEach(function (s) {
@@ -141,10 +142,15 @@
       html += '</div>';
     });
     box.innerHTML = html;
-    $('mpm').value = Math.floor(st.mp / 60); $('mps').value = Math.round(st.mp % 60) || '';
+    setMpFields();
     syncUi();
   }
   /* Show the goal in all three forms. The goal time st.T stays the source of truth. */
+  /* Marathon pace is stored as seconds per km. Show it as min/sec outdoors, km/h on a treadmill. */
+  function setMpFields(skip) {
+    if (skip !== 'pace') { $('mpm').value = Math.floor(st.mp / 60); $('mps').value = Math.round(st.mp % 60) || ''; }
+    if (skip !== 'speed') $('mpk').value = Math.round(3600 / st.mp * 10) / 10;
+  }
   function setGoalFields(T) {
     if (!(T > 0) || !(st.km > 0)) return;
     var t = Math.round(T), p = Math.round(T / st.km);
@@ -167,7 +173,8 @@
     $('stepLbl').textContent = tm() ? 'Round speed to nearest' : 'Round pace to nearest';
     $('tmHint').hidden = !(tm() && !st.round);
     $('compWrap').hidden = !(st.round || tm());
-    $('mpOut').textContent = 'Marathon at this pace: ' + E.fmtT(st.mp * 42.195) + ' · ' + (3600 / st.mp).toFixed(1) + ' km/h';
+    $('mpm').closest('.time').hidden = tm(); $('mpSpeed').hidden = !tm();
+    $('mpOut').textContent = 'Marathon at this pace: ' + E.fmtT(st.mp * 42.195) + ' · ' + (tm() ? E.fmtT(st.mp) + ' /km' : (3600 / st.mp).toFixed(1) + ' km/h');
     $('firstOut').textContent = st.firstSlow; $('kickOut').textContent = st.kick;
   }
   function num(id, def) { var v = parseFloat($(id).value); return isFinite(v) ? v : def; }
@@ -178,7 +185,6 @@
     st.paceStep = +$('paceStep').value; st.speedStep = +$('speedStep').value; st.group = +$('group').value;
     st.firstSlow = +$('firstSlow').value; st.kick = +$('kick').value;
     st.incline = Math.min(15, Math.max(0, num('incline', 0)));
-    st.mp = Math.max(120, num('mpm', 0) * 60 + num('mps', 0));
   }
 
   /* ---------- rendering ---------- */
@@ -509,6 +515,8 @@
       var oldKm = st.km;
       readInputs();
       if (/^(th|tm|ts|pm|ps|spd)$/.test(t.id)) st.T = goalFromFields();
+      else if (t.id === 'mpk') { st.mp = Math.min(1800, Math.max(120, 3600 / Math.max(2, num('mpk', 0) || 2))); setMpFields('speed'); }
+      else if (t.id === 'mpm' || t.id === 'mps') { st.mp = Math.max(120, num('mpm', 0) * 60 + num('mps', 0)); setMpFields('pace'); }
       else if (t.id === 'km' && st.km > 0) kmChanged(oldKm);
       render();
     }
