@@ -65,7 +65,7 @@
     mpintervals: { v: 0, n: 3, blkLen: 0, rest: 1, wu: 3, cd: 2 }
   };
   function params(id, sp) {
-    return Object.assign({}, PARAM_DEFAULTS[id] || {}, (sp && sp[id]) || {});
+    return Object.assign({}, PARAM_DEFAULTS[id] || (LR[id] && LR[id].d) || {}, (sp && sp[id]) || {});
   }
 
   function buildSegments(totalM, splitM) { return segmentsFor('', totalM, splitM, {}); }
@@ -156,11 +156,11 @@
     }
   }
 
-  function segmentsFor(id, totalM, splitM, p, extra) {
+  function segmentsFor(id, totalM, splitM, p, extra, zonesOverride) {
     const cuts = [0, totalM];
     fracCuts(id, p).forEach(function (f) { if (f > 0 && f < 1) cuts.push(f * totalM); });
     (extra || []).forEach(function (c) { if (c > 0 && c < totalM) cuts.push(c); });
-    const zones = zonesFor(id, totalM, p).zones;
+    const zones = zonesOverride || zonesFor(id, totalM, p).zones;
     zones.forEach(function (z) { cuts.push(z[0], z[1]); });
     for (let pos = splitM; pos < totalM - 0.5; pos += splitM) cuts.push(pos);
     const walks = [];
@@ -185,6 +185,8 @@
       segs.push({
         startM: a, endM: b, d: b - a,
         role: zone ? zone[2] : '',
+        zonePace: zone ? zone[3] : undefined,
+        incline: zone ? zone[4] : undefined,
         walk: walks.some(function (w) { return mid > w[0] && mid < w[1]; })
       });
     }
@@ -239,7 +241,7 @@
     const fk = id === 'fartlek' ? fartlek(n, v, p.seed) : null;
     const lad = id === 'ladder' ? ladder(n, p) : null;
     return segs.map(function (s, i) {
-      if (s.walk || s.role === 'mp' || s.role === 'fast') return 0;
+      if (s.walk || s.zonePace || s.role === 'mp' || s.role === 'fast') return 0;
       if (s.role === 'wu' || s.role === 'cd') return 1 + v;
       const x = (s.startM + s.d / 2) / totalM;
       switch (id) {
@@ -310,6 +312,190 @@
     return { pace: pace, speed: 3600 / pace };
   }
 
+  /* ===== Structured long runs (from the long-run workout guides) =====
+     A structure is a list of steps. Each step is a fixed distance (km), a fixed time (min), or an easy "fill"
+     that absorbs whatever distance is left. Zone steps keep a fixed pace set from your marathon pace plus a
+     zone offset; easy steps share one pace that is solved so the whole run still matches distance and goal. */
+  const ZONE_DEFAULTS = { steady: 20, float: 18, sub: -8, lt: -15, hmp: -12, k10: -28, k5: -38 };
+  const ZONE_LABELS = { steady: 'Steady (LT1)', float: 'Float', sub: 'Sub-threshold', lt: 'Threshold (LT2)', hmp: 'Half-marathon pace', k10: '10K pace', k5: '5K pace' };
+  const ZONE_TAG = { steady: 'steady', float: 'float', mp: 'MP', fast: 'MP+', sub: 'sub-T', lt: 'threshold', hmp: 'HMP', k10: '10K', k5: '5K', hill: 'hill' };
+  const En = function (km) { return { z: 'easy', km: km }; };
+  const Fl = function (w) { return { z: 'easy', fill: w === undefined ? 1 : w }; };
+  const Zn = function (z, km, o) { return Object.assign({ z: z, km: km }, o || {}); };
+  const Tm = function (z, min, o) { return Object.assign({ z: z, min: min }, o || {}); };
+  const Jg = function (sec) { return { z: 'easy', min: sec / 60 }; };   // easy jog by time
+  const times = function (n, fn) { const o = []; for (let i = 0; i < Math.max(0, Math.round(n)); i++) fn(i, o); return o; };
+
+  const LR = {
+    pfitz: { g: 'lrmp', name: 'Pfitzinger classic', blurb: 'Easy running, then one long continuous block at marathon pace, then a short cool-down. The benchmark long run for marathon readiness.',
+      d: { mp: 19, cd: 2.5 }, ui: [['mp', 'Marathon-pace block', 6, 26, 1, 'km'], ['cd', 'Cool-down', 0, 5, 0.5, 'km']],
+      build: function (p) { return [Fl(), Zn('mp', p.mp), En(p.cd)]; } },
+    mcmillan: { g: 'lrmp', name: 'McMillan fast-finish', blurb: 'Long easy running, a marathon-pace block, with the last kilometres a touch faster than marathon pace.',
+      d: { mp: 8, fast: 2, fo: -7, cd: 2 }, ui: [['mp', 'Total at marathon pace or faster', 4, 14, 1, 'km'], ['fast', 'Faster final part', 0, 4, 0.5, 'km'], ['fo', 'Final part pace', -15, 0, 1, 'off'], ['cd', 'Cool-down', 0, 4, 0.5, 'km']],
+      build: function (p) { return [Fl(), Zn('mp', Math.max(0, p.mp - p.fast)), Zn('fast', p.fast, { off: p.fo }), En(p.cd)]; } },
+    mpsandwich: { g: 'lrmp', name: 'Marathon-pace sandwich', blurb: 'Early marathon-pace block, a long easy stretch, then a second block on tired legs, then a cool-down.',
+      d: { wu: 3, a: 7, b: 7, cd: 2 }, ui: [['wu', 'Easy start', 1, 8, 0.5, 'km'], ['a', 'First MP block', 3, 12, 1, 'km'], ['b', 'Second MP block', 3, 12, 1, 'km'], ['cd', 'Cool-down', 0, 4, 0.5, 'km']],
+      build: function (p) { return [En(p.wu), Zn('mp', p.a), Fl(), Zn('mp', p.b), En(p.cd)]; } },
+    belly: { g: 'lrmp', name: 'Mid-run belly block', blurb: 'Easy running, a big marathon-pace block in the middle, then easy running to finish with good form.',
+      d: { mp: 15, share: 50 }, ui: [['mp', 'Marathon-pace block', 6, 22, 1, 'km'], ['share', 'Easy km before the block', 10, 90, 5, 'pct']],
+      build: function (p) { return [Fl(p.share), Zn('mp', p.mp), Fl(100 - p.share)]; } },
+    broken: { g: 'lrmp', name: 'Classic broken MP reps', blurb: 'Several marathon-pace reps (like 4 × 5 km) with short easy or float recoveries. Easier on the legs than one long block.',
+      d: { n: 4, blk: 5, rest: 1, fl: 0, cd: 3 }, ui: [['n', 'Reps', 2, 8, 1, 'x'], ['blk', 'Rep length', 2, 10, 0.5, 'km'], ['rest', 'Recovery', 0.5, 3, 0.5, 'km'], ['fl', 'Recovery type', 0, 1, 1, 'fl'], ['cd', 'Cool-down', 0, 5, 0.5, 'km']],
+      build: function (p) { return [Fl()].concat(times(p.n, function (i, o) { o.push(Zn('mp', p.blk)); if (i < p.n - 1) o.push(p.fl ? Zn('float', p.rest) : En(p.rest)); }), [En(p.cd)]); } },
+    mpladder: { g: 'lrmp', name: 'Descending MP ladder', blurb: 'Marathon-pace reps that shrink (8, 6, 4 km) with easy gaps, then a short faster finish.',
+      d: { top: 8, step: 2, rungs: 3, rest: 1.5, fin: 2, cd: 2 }, ui: [['top', 'Longest rep', 3, 12, 1, 'km'], ['step', 'Shrinks by', 0.5, 4, 0.5, 'km'], ['rungs', 'Reps', 2, 5, 1, 'x'], ['rest', 'Easy gap', 0.5, 3, 0.5, 'km'], ['fin', 'HMP finish', 0, 5, 0.5, 'km'], ['cd', 'Cool-down', 0, 4, 0.5, 'km']],
+      build: function (p) {
+        const o = [Fl()];
+        times(p.rungs, function (r) { o.push(Zn('mp', Math.max(0.5, p.top - p.step * r))); if (r < p.rungs - 1 || p.fin > 0) o.push(En(p.rest)); });
+        o.push(Zn('hmp', p.fin), En(p.cd)); return o;
+      } },
+    micro: { g: 'lrmp', name: 'MP micro-blocks', blurb: 'Many short marathon-pace blocks (like 9 × 2 km) with 1 km easy between. Low damage, high volume.',
+      d: { n: 9, blk: 2, rest: 1, cd: 2 }, ui: [['n', 'Blocks', 4, 14, 1, 'x'], ['blk', 'Block length', 1, 4, 0.5, 'km'], ['rest', 'Easy between', 0.5, 2, 0.5, 'km'], ['cd', 'Cool-down', 0, 4, 0.5, 'km']],
+      build: function (p) { return [Fl()].concat(times(p.n, function (i, o) { o.push(Zn('mp', p.blk)); if (i < p.n - 1) o.push(En(p.rest)); }), [En(p.cd)]); } },
+    mtm: { g: 'lrmp', name: 'Daniels M-T-M', blurb: 'Marathon pace, two threshold reps to spike lactate, then back down to marathon pace.',
+      d: { a: 10, reps: 2, lt: 3, jog: 2, b: 6, cd: 3 }, ui: [['a', 'First MP block', 4, 16, 1, 'km'], ['reps', 'Threshold reps', 1, 4, 1, 'x'], ['lt', 'Threshold rep', 1, 5, 0.5, 'km'], ['jog', 'Jog between', 1, 4, 0.5, 'min'], ['b', 'Last MP block', 3, 12, 1, 'km'], ['cd', 'Cool-down', 0, 5, 0.5, 'km']],
+      build: function (p) { return [Fl(), Zn('mp', p.a)].concat(times(p.reps, function (i, o) { o.push(Zn('lt', p.lt)); if (i < p.reps - 1) o.push(Jg(p.jog * 60)); }), [Zn('mp', p.b), En(p.cd)]); } },
+    canova: { g: 'lrmp', name: 'Canova over/under', blurb: 'Continuous alternation: longer stretches just under marathon pace, short stretches faster. Goal pace becomes the "recovery".',
+      d: { n: 5, under: 3, over: 1, up: 99, op: 104, cd: 3 }, ui: [['n', 'Pairs', 2, 8, 1, 'x'], ['under', 'Under stretch', 1, 5, 0.5, 'km'], ['over', 'Over stretch', 0.5, 3, 0.5, 'km'], ['up', 'Under speed', 95, 100, 1, 'pctmp'], ['op', 'Over speed', 101, 110, 1, 'pctmp'], ['cd', 'Cool-down', 0, 5, 0.5, 'km']],
+      build: function (p) { return [Fl()].concat(times(p.n, function (i, o) { o.push(Zn('mp', p.under, { pct: p.up }), Zn('hmp', p.over, { pct: p.op })); }), [En(p.cd)]); } },
+    onoff: { g: 'lrmp', name: 'On/off float', blurb: 'Marathon-pace blocks with a steady float (not a jog) between them, keeping aerobic demand high.',
+      d: { n: 6, mp: 3, fl: 1, off: 18, cd: 2 }, ui: [['n', 'Cycles', 3, 10, 1, 'x'], ['mp', 'MP block', 1, 6, 0.5, 'km'], ['fl', 'Float', 0.5, 3, 0.5, 'km'], ['off', 'Float pace', 5, 35, 1, 'off'], ['cd', 'Cool-down', 0, 4, 0.5, 'km']],
+      build: function (p) { return [Fl()].concat(times(p.n, function (i, o) { o.push(Zn('mp', p.mp), Zn('float', p.fl, { off: p.off })); }), [En(p.cd)]); } },
+    ratchet: { g: 'lrmp', name: '1K/1K ratchet', blurb: 'Alternate 1 km at marathon pace with 1 km slower. Trains pace judgment and control.',
+      d: { n: 10, km: 1, off: 25, cd: 2 }, ui: [['n', 'Pairs', 4, 14, 1, 'x'], ['km', 'Each stretch', 0.5, 2, 0.5, 'km'], ['off', 'Slower stretch', 10, 40, 1, 'off'], ['cd', 'Cool-down', 0, 4, 0.5, 'km']],
+      build: function (p) { return [Fl()].concat(times(p.n, function (i, o) { o.push(Zn('mp', p.km), Zn('float', p.km, { off: p.off })); }), [En(p.cd)]); } },
+    thirds: { g: 'lrmp', name: 'Thirds progression', blurb: 'Easy first third, steady middle third, marathon pace for the last third. Teaches patience early and grit late.',
+      d: { st: 22 }, ui: [['st', 'Middle third pace', 10, 35, 1, 'off']],
+      build: function (p, c) { const t = c.tot / 3; return [En(t), Zn('steady', t, { off: p.st }), Zn('mp', t)]; } },
+    stepdown: { g: 'lrmp', name: 'Step-down cutdown', blurb: 'Pace drops every 5 km through steady and high aerobic to marathon pace, then a faster finish.',
+      d: { a: 5, b: 5, c: 5, d: 3, cd: 2, o1: 30, o2: 15, o3: -12 }, ui: [['a', 'Steady stretch', 2, 8, 1, 'km'], ['o1', 'Steady pace', 15, 45, 1, 'off'], ['b', 'High aerobic stretch', 2, 8, 1, 'km'], ['o2', 'High aerobic pace', 5, 30, 1, 'off'], ['c', 'Marathon-pace stretch', 2, 10, 1, 'km'], ['d', 'Sub-threshold finish', 1, 6, 0.5, 'km'], ['o3', 'Finish pace', -25, 0, 1, 'off'], ['cd', 'Cool-down', 0, 4, 0.5, 'km']],
+      build: function (p) { return [Fl(), Zn('steady', p.a, { off: p.o1 }), Zn('float', p.b, { off: p.o2 }), Zn('mp', p.c), Zn('hmp', p.d, { off: p.o3 }), En(p.cd)]; } },
+    squires: { g: 'lrmp', name: 'Squires surge long run', blurb: 'Long steady running with regular short surges at half-marathon or 10K effort, then straight back to rhythm.',
+      d: { n: 8, every: 2.5, start: 8, len: 2, zn: 0 }, ui: [['n', 'Surges', 3, 12, 1, 'x'], ['every', 'Every', 1.5, 4, 0.5, 'km'], ['start', 'First surge at', 3, 14, 1, 'km'], ['len', 'Surge length', 1, 4, 0.5, 'min'], ['zn', 'Surge pace', 0, 1, 1, 'z2']],
+      build: function (p, c) {
+        const z = p.zn ? 'k10' : 'hmp', sk = p.len * 60 / c.pace(z);
+        const gap = Math.max(0.2, p.every - sk), o = [En(p.start)];
+        times(p.n, function (i) { o.push(Tm(z, p.len)); o.push(i < p.n - 1 ? En(gap) : Fl()); });
+        return o;
+      } },
+
+    subt: { g: 'lrot', name: 'Sub-threshold embedded long run', blurb: 'Long run with several sub-threshold reps and short jogs, keeping lactate controlled across lots of volume.',
+      d: { n: 4, rep: 3, jog: 75, cd: 4 }, ui: [['n', 'Reps', 2, 6, 1, 'x'], ['rep', 'Rep length', 1.5, 5, 0.5, 'km'], ['jog', 'Jog between', 30, 120, 15, 's'], ['cd', 'Easy finish', 0, 6, 0.5, 'km']],
+      build: function (p) { return [Fl()].concat(times(p.n, function (i, o) { o.push(Zn('sub', p.rep)); if (i < p.n - 1) o.push(Jg(p.jog)); }), [En(p.cd)]); } },
+    bookend: { g: 'lrot', name: 'Bookend threshold sandwich', blurb: 'A threshold block early, a long easy middle, another threshold block late, then a cool-down.',
+      d: { wu: 3, a: 3.5, b: 3.5, cd: 2 }, ui: [['wu', 'Easy start', 1, 6, 0.5, 'km'], ['a', 'First threshold block', 2, 6, 0.5, 'km'], ['b', 'Second threshold block', 2, 6, 0.5, 'km'], ['cd', 'Cool-down', 0, 4, 0.5, 'km']],
+      build: function (p) { return [En(p.wu), Zn('lt', p.a), Fl(), Zn('lt', p.b), En(p.cd)]; } },
+    cruise: { g: 'lrot', name: 'Late-run cruise intervals', blurb: 'Lots of easy running, then threshold cruise intervals at the end on tired legs.',
+      d: { n: 4, rep: 2, jog: 90, cd: 2 }, ui: [['n', 'Reps', 2, 6, 1, 'x'], ['rep', 'Rep length', 1, 4, 0.5, 'km'], ['jog', 'Jog between', 30, 150, 15, 's'], ['cd', 'Cool-down', 0, 4, 0.5, 'km']],
+      build: function (p) { return [Fl()].concat(times(p.n, function (i, o) { o.push(Zn('lt', p.rep)); if (i < p.n - 1) o.push(Jg(p.jog)); }), [En(p.cd)]); } },
+    tlt: { g: 'lrot', name: 'Daniels T-L-T', blurb: 'Threshold reps, a long steady bridge, then threshold reps again. Nearly 10 km of threshold work in one run.',
+      d: { wu: 3, n: 3, rep: 1.6, rest: 60, cd: 2 }, ui: [['wu', 'Easy start', 1, 6, 0.5, 'km'], ['n', 'Reps per set', 2, 5, 1, 'x'], ['rep', 'Rep length', 1, 3, 0.2, 'km'], ['rest', 'Rest', 30, 120, 15, 's'], ['cd', 'Cool-down', 0, 4, 0.5, 'km']],
+      build: function (p) {
+        const set = function () { return times(p.n, function (i, o) { o.push(Zn('lt', p.rep)); if (i < p.n - 1) o.push(Jg(p.rest)); }); };
+        return [En(p.wu)].concat(set(), [Fl()], set(), [En(p.cd)]);
+      } },
+    cutdown: { g: 'lrot', name: 'Multi-stage cutdown pyramid', blurb: 'Steady, then marathon pace, then half-marathon pace, then 10K pace as the blocks get shorter.',
+      d: { st: 6, mp: 5, hm: 4, tk: 2, cd: 3 }, ui: [['st', 'Steady block', 2, 10, 1, 'km'], ['mp', 'Marathon-pace block', 2, 8, 1, 'km'], ['hm', 'HMP block', 1, 6, 0.5, 'km'], ['tk', '10K block', 0.5, 4, 0.5, 'km'], ['cd', 'Cool-down', 0, 5, 0.5, 'km']],
+      build: function (p) { return [Fl(), Zn('steady', p.st), Zn('mp', p.mp), Zn('hmp', p.hm), Zn('k10', p.tk), En(p.cd)]; } },
+    kitchen: { g: 'lrot', name: 'Kitchen sink hybrid', blurb: 'Steady running, threshold kilometres, then 400 m reps at 5K pace. Aerobic, threshold and speed in one run.',
+      d: { st: 6, nt: 4, tk: 1, tj: 90, n5: 4, d5: 0.4, j5: 60, cd: 3 }, ui: [['st', 'Steady/MP block', 3, 10, 1, 'km'], ['nt', 'Threshold reps', 2, 6, 1, 'x'], ['tk', 'Threshold rep', 0.5, 2, 0.5, 'km'], ['tj', 'Threshold jog', 45, 120, 15, 's'], ['n5', '5K-pace reps', 2, 8, 1, 'x'], ['d5', '5K rep', 0.2, 1, 0.2, 'km'], ['j5', '5K jog', 30, 90, 15, 's'], ['cd', 'Cool-down', 0, 5, 0.5, 'km']],
+      build: function (p) {
+        return [Fl(), Zn('mp', p.st), Jg(180)].concat(
+          times(p.nt, function (i, o) { o.push(Zn('lt', p.tk), Jg(p.tj)); }),
+          times(p.n5, function (i, o) { o.push(Zn('k5', p.d5)); if (i < p.n5 - 1) o.push(Jg(p.j5)); }), [En(p.cd)]);
+      } },
+    wave: { g: 'lrot', name: 'Alternating wave', blurb: 'Continuous waves of half-marathon pace and steady running, with no slow jog. Spikes lactate then clears it.',
+      d: { sets: 3, hmp: 2, st: 3, cd: 3 }, ui: [['sets', 'Waves', 2, 6, 1, 'x'], ['hmp', 'HMP stretch', 1, 4, 0.5, 'km'], ['st', 'Steady stretch', 1, 5, 0.5, 'km'], ['cd', 'Cool-down', 0, 5, 0.5, 'km']],
+      build: function (p) { return [Fl()].concat(times(p.sets, function (i, o) { o.push(Zn('hmp', p.hmp), Zn('steady', p.st)); }), [En(p.cd)]); } },
+    michigan: { g: 'lrot', name: 'Road Michigan', blurb: 'A race-simulation run: surges at HMP, 10K and 5K effort separated by steady floats.',
+      d: { h: 3, gap: 2.5, a: 2, b: 1.5, c: 1, cd: 3 }, ui: [['h', 'HMP surge', 1, 5, 0.5, 'km'], ['gap', 'Steady float', 1, 4, 0.5, 'km'], ['a', '10–15K surge', 1, 4, 0.5, 'km'], ['b', '10K surge', 0.5, 3, 0.5, 'km'], ['c', '5K surge', 0.5, 2, 0.5, 'km'], ['cd', 'Cool-down', 0, 5, 0.5, 'km']],
+      build: function (p) { return [Fl(), Zn('hmp', p.h), Zn('steady', p.gap), Zn('k10', p.a, { add: 5 }), Zn('steady', p.gap), Zn('k10', p.b), Zn('steady', p.gap), Zn('k5', p.c), En(p.cd)]; } },
+    rhythm: { g: 'lrot', name: '1/4 rhythm disrupter', blurb: 'Time-based fartlek: 1 minute fast, 4 minutes steady, repeated. The fast minute breaks rhythm; the steady float settles you back.',
+      d: { n: 10, on: 1, off: 4, fo: 15, cd: 3 }, ui: [['n', 'Cycles', 4, 14, 1, 'x'], ['on', 'Fast', 0.5, 3, 0.5, 'min'], ['off', 'Steady', 2, 8, 1, 'min'], ['fo', 'Steady pace', 5, 30, 1, 'off'], ['cd', 'Cool-down', 0, 5, 0.5, 'km']],
+      build: function (p) { return [Fl()].concat(times(p.n, function (i, o) { o.push(Tm('k10', p.on), Tm('float', p.off, { off: p.fo })); }), [En(p.cd)]); } },
+    deek: { g: 'lrot', name: 'Deek 5-on / 5-off', blurb: 'Time-based fartlek: 5 minutes near marathon-to-half-marathon effort, 5 minutes easy-moderate, repeated.',
+      d: { n: 6, on: 5, off: 5, so: -6, cd: 3 }, ui: [['n', 'Cycles', 3, 10, 1, 'x'], ['on', 'On', 2, 8, 1, 'min'], ['off', 'Off (easy)', 2, 8, 1, 'min'], ['so', 'On pace', -15, 0, 1, 'off'], ['cd', 'Cool-down', 0, 5, 0.5, 'km']],
+      build: function (p) { return [Fl()].concat(times(p.n, function (i, o) { o.push(Tm('hmp', p.on, { off: p.so }), { z: 'easy', min: p.off }); }), [En(p.cd)]); } },
+    kenyan: { g: 'lrot', name: 'Kenyan ladder fartlek', blurb: 'Time-based ladder of 1-2-3-2-1 minutes fast, each followed by an equal float.',
+      d: { sets: 2, peak: 3, on: -18, cd: 4 }, ui: [['sets', 'Sets', 1, 4, 1, 'x'], ['peak', 'Longest rep', 2, 5, 1, 'min'], ['on', 'Fast pace', -30, -5, 1, 'off'], ['cd', 'Cool-down', 0, 6, 0.5, 'km']],
+      build: function (p) {
+        const reps = []; for (let k = 1; k <= p.peak; k++) reps.push(k); for (let k = p.peak - 1; k >= 1; k--) reps.push(k);
+        return [Fl()].concat(times(p.sets, function (i, o) { reps.forEach(function (m) { o.push(Tm('hmp', m, { off: p.on }), Tm('float', m)); }); }), [En(p.cd)]);
+      } },
+    mona: { g: 'lrot', name: 'Double Mona fartlek', blurb: 'Late-run Mona fartlek sets (2×90 s, 4×60 s, 4×30 s, 4×15 s fast, equal float) done twice on tired legs.',
+      d: { sets: 2, jog: 5, cd: 2 }, ui: [['sets', 'Mona sets', 1, 3, 1, 'x'], ['jog', 'Jog between sets', 2, 8, 1, 'min'], ['cd', 'Cool-down', 0, 4, 0.5, 'km']],
+      build: function (p) {
+        const pat = [[2, 90], [4, 60], [4, 30], [4, 15]], o = [Fl()];
+        times(p.sets, function (i) {
+          pat.forEach(function (q) { times(q[0], function () { o.push(Tm('k10', q[1] / 60), Tm('float', q[1] / 60)); }); });
+          if (i < p.sets - 1) o.push(Jg(p.jog * 60));
+        });
+        o.push(En(p.cd)); return o;
+      } },
+    hmpdest: { g: 'lrot', name: 'HMP destroyer', blurb: 'The half-marathon predictor: 2 × 5 km (or 3 × 3.2 km) at half-marathon pace with easy jogs between.',
+      d: { n: 2, rep: 5, rest: 1, cd: 4 }, ui: [['n', 'Reps', 2, 4, 1, 'x'], ['rep', 'Rep length', 2, 6, 0.2, 'km'], ['rest', 'Easy jog', 0.5, 2, 0.5, 'km'], ['cd', 'Cool-down', 0, 6, 0.5, 'km']],
+      build: function (p) { return [Fl()].concat(times(p.n, function (i, o) { o.push(Zn('hmp', p.rep)); if (i < p.n - 1) o.push(En(p.rest)); }), [En(p.cd)]); } },
+    hmpfinish: { g: 'lrot', name: 'Fast-finish sub-threshold grind', blurb: 'Lots of easy running, then a continuous half-marathon-pace block when glycogen is low.',
+      d: { blk: 5, cd: 2 }, ui: [['blk', 'HMP block', 3, 8, 0.5, 'km'], ['cd', 'Cool-down', 0, 4, 0.5, 'km']],
+      build: function (p) { return [Fl(), Zn('hmp', p.blk), En(p.cd)]; } },
+    hillthr: { g: 'lrot', name: 'Hill-to-threshold', blurb: 'Short steep hill reps at 5K effort, then straight into a flat threshold block on tired legs. On a treadmill the reps use incline.',
+      d: { n: 7, sec: 45, jog: 75, incl: 8, thr: 4, cd: 3 }, ui: [['n', 'Hill reps', 4, 10, 1, 'x'], ['sec', 'Rep length', 30, 90, 5, 's'], ['jog', 'Jog down', 45, 120, 15, 's'], ['incl', 'Hill incline', 2, 15, 0.5, 'pcti'], ['thr', 'Threshold block', 2, 6, 0.5, 'km'], ['cd', 'Cool-down', 0, 5, 0.5, 'km']],
+      build: function (p) {
+        return [Fl()].concat(times(p.n, function (i, o) { o.push(Tm('k5', p.sec / 60, { role: 'hill', incline: p.incl })); if (i < p.n - 1) o.push(Jg(p.jog)); }), [Jg(180), Zn('lt', p.thr), En(p.cd)]);
+      } },
+    lydiard: { g: 'lrot', name: 'Lydiard hill circuit', blurb: 'Easy start, a long block of hill surges for strength, then steady flat running to flush the legs out.',
+      d: { mins: 28, incl: 5, st: 11, cd: 2 }, ui: [['mins', 'Hill circuit', 15, 40, 1, 'min'], ['incl', 'Hill incline', 2, 12, 0.5, 'pcti'], ['st', 'Steady flat', 5, 15, 1, 'km'], ['cd', 'Cool-down', 0, 4, 0.5, 'km']],
+      build: function (p) { return [Fl(), Tm('lt', p.mins, { role: 'hill', incline: p.incl }), Zn('steady', p.st), En(p.cd)]; } }
+  };
+  const LR_IDS = Object.keys(LR);
+  LR_IDS.forEach(function (id) {
+    STRATEGIES.push({ id: id, group: LR[id].g, mp: true, name: LR[id].name, blurb: LR[id].blurb });
+  });
+  const LR_UI = {};
+  LR_IDS.forEach(function (id) { LR_UI[id] = LR[id].ui; });
+
+  function lrLayout(id, p, cfg, totalM) {
+    const mp = cfg.mp > 0 ? cfg.mp : 330, zo = Object.assign({}, ZONE_DEFAULTS, cfg.zoneOff || {});
+    const tot = totalM / 1000, notes = [];
+    const paceOf = function (s) {
+      if (s.pct) return mp * 100 / s.pct;
+      const o = s.off != null ? s.off : (s.z === 'easy' ? 0 : (zo[s.z] || 0));
+      return mp + o + (s.add || 0);
+    };
+    const ctx = { tot: tot, mp: mp, zo: zo, pace: function (z, o) { return paceOf(Object.assign({ z: z }, o || {})); } };
+    const steps = LR[id].build(p, ctx).filter(function (s) { return s && s.fill !== 0 && s.km !== 0 && s.min !== 0; });
+    let base = cfg.T / tot, dist = [], scaled = 1;
+    for (let it = 0; it < 30; it++) {
+      dist = steps.map(function (s) { return s.fill != null ? null : (s.km != null ? s.km : s.min * 60 / (s.z === 'easy' ? base : paceOf(s))); });
+      let fixedSum = 0, fillW = 0;
+      steps.forEach(function (s, i) { if (s.fill != null) fillW += s.fill; else fixedSum += dist[i]; });
+      scaled = 1;
+      if (fillW > 0) {
+        let room = tot - fixedSum;
+        if (room < 0.04 * tot) { scaled = 0.96 * tot / fixedSum; room = 0.04 * tot; }
+        steps.forEach(function (s, i) { dist[i] = s.fill != null ? room * s.fill / fillW : dist[i] * scaled; });
+      } else {
+        scaled = fixedSum > 0 ? tot / fixedSum : 1;
+        dist = dist.map(function (d) { return d * scaled; });
+      }
+      let fixedTime = 0, easyD = 0;
+      steps.forEach(function (s, i) { if (s.z === 'easy') easyD += dist[i]; else fixedTime += dist[i] * paceOf(s); });
+      const nb = easyD > 1e-6 ? (cfg.T - fixedTime) / easyD : base;
+      if (!(nb > 0)) break;
+      const done = Math.abs(nb - base) < 0.005;
+      base = nb;
+      if (done) break;
+    }
+    if (Math.abs(scaled - 1) > 0.005) notes.push('This structure is longer than your run, so every step was scaled to ' + Math.round(scaled * 100) + '% to fit.');
+    const zones = []; let cum = 0;
+    steps.forEach(function (s, i) {
+      const a = cum * 1000; cum += dist[i];
+      const b = i === steps.length - 1 ? totalM : cum * 1000;
+      zones.push([a, b, s.role || s.z, s.z === 'easy' ? undefined : paceOf(s), s.incline]);
+    });
+    return { zones: zones, notes: notes };
+  }
+
   /*
    cfg: { km, T (target s), treadmill, round, paceStep (s), speedStep (km/h), group (km, 0 = each split),
           comp, splitM (m), sp (per-strategy params), firstSlow (s/km, first km), kick (s/km, last km) }
@@ -319,10 +505,12 @@
     const mp = cfg.mp > 0 ? cfg.mp : 330;
     const totalM = Math.round(cfg.km * 1000);
     const win0 = Math.min(1000, totalM / 3);
-    const segs = segmentsFor(id, totalM, cfg.splitM, p, [cfg.firstSlow ? win0 : 0, cfg.kick ? totalM - win0 : 0]);
+    const lr = LR[id] ? lrLayout(id, p, cfg, totalM) : null;
+    const segs = segmentsFor(id, totalM, cfg.splitM, p, [cfg.firstSlow ? win0 : 0, cfg.kick ? totalM - win0 : 0], lr && lr.zones);
     const m = multipliers(id, segs, totalM, p);
     segs.forEach(function (s) {
-      if (s.walk) s.fixedPace = p.wp;
+      if (s.zonePace) s.fixedPace = s.zonePace;
+      else if (s.walk) s.fixedPace = p.wp;
       else if (s.role === 'mp') s.fixedPace = mp;
       else if (s.role === 'fast') s.fixedPace = mp * (1 - p.v / 100);
     });
@@ -368,6 +556,7 @@
       carry = fixed ? carry + (want - q.pace * dist) : want - q.pace * dist;
       b.segs.forEach(function (s) {
         s.pace = q.pace; s.speed = q.speed;
+        s.fx = !!s.fixedPace;
         delete s.fixedPace;
         s.time = q.pace * s.d / 1000;
         s.startT = cum;
@@ -384,13 +573,14 @@
     };
     res.base = base;
     const w = [];
-    if (MP_IDS.indexOf(id) >= 0) {
+    if (MP_IDS.indexOf(id) >= 0 || LR[id]) {
       const q = function (x) { return fmtT(x) + ' /km'; };
       if (num <= 0 || base < mp - 0.5) w.push('To hit your goal, the easy parts would need ' + q(base) + ', faster than your marathon pace (' + q(mp) + '). Raise the goal time, shorten the marathon-pace part, or slow your marathon pace.');
       else if (base > mp * 1.6) w.push('The easy parts would be very slow (' + q(base) + ') next to your marathon pace (' + q(mp) + '). Check the goal time and marathon pace.');
     }
     res.warn = w;
-    res.notes = MP_IDS.indexOf(id) >= 0 ? zonesFor(id, totalM, p).notes : [];
+    res.notes = lr ? lr.notes.slice() : (MP_IDS.indexOf(id) >= 0 ? zonesFor(id, totalM, p).notes : []);
+    if (lr) { const off = Math.round(base - mp); res.notes.push('Easy parts run at ' + fmtT(base) + ' /km (MP' + (off >= 0 ? '+' : '\u2212') + Math.abs(off) + ' s/km).'); }
     if ((id === 'interval' && segs.length < Math.max(0, p.wu) + Math.max(0, p.cd) + 2) || (id === 'ladder' && segs.length < Math.max(0, p.wu) + Math.max(0, p.cd) + 3)) {
       res.notes.push('Too few splits for the warm-up and cool-down you set, so easy and hard splits simply alternate. Use a shorter split length.');
     }
@@ -458,8 +648,8 @@
     res.segs.forEach(function (s) {
       const label = treadmill ? s.speed.toFixed(1) : fmtT(s.pace);
       const last = out[out.length - 1];
-      if (last && last.label === label && !!last.walk === !!s.walk && last.role === s.role) { last.endM = s.endM; last.endT = s.cum; }
-      else out.push({ label: label, walk: s.walk, role: s.role, startM: s.startM, endM: s.endM, startT: s.startT, endT: s.cum });
+      if (last && last.label === label && !!last.walk === !!s.walk && last.role === s.role && last.incline === s.incline) { last.endM = s.endM; last.endT = s.cum; }
+      else out.push({ label: label, walk: s.walk, role: s.role, incline: s.incline, startM: s.startM, endM: s.endM, startT: s.startT, endT: s.cum });
     });
     return out;
   }
@@ -477,12 +667,12 @@
     const rows = runs(res, true).map(function (x, i) {
       const speed = +x.label;
       const dur = Math.round(x.endT) - Math.round(x.startT);
-      const msg = 'Interval ' + (i + 1) + (x.walk ? ' walk' : '') + (x.role === 'mp' ? ' MP' : '') + ' (' + fmtKm(x.startM) + '-' + fmtKm(x.endM) + ' km)';
-      return { dur: dur, speed: speed, msg: msg };
+      const msg = 'Interval ' + (i + 1) + (x.walk ? ' walk' : '') + (ZONE_TAG[x.role] ? ' ' + ZONE_TAG[x.role] : '') + ' (' + fmtKm(x.startM) + '-' + fmtKm(x.endM) + ' km)';
+      return { dur: dur, speed: speed, msg: msg, incline: x.incline != null ? x.incline : incline };
     }).filter(function (r) { return r.dur > 0; });
     let xml = '<?xml version="1.0" encoding="UTF-8"?>\n<rows device="treadmill">\n';
     rows.forEach(function (r) {
-      xml += '    <row duration="' + hms(r.dur) + '" speed="' + r.speed + '" inclination="' + incline + '" forcespeed="1" looptimehr="10">\n' +
+      xml += '    <row duration="' + hms(r.dur) + '" speed="' + r.speed + '" inclination="' + r.incline + '" forcespeed="1" looptimehr="10">\n' +
         '        <textevent timeoffset="0" message="' + esc(r.msg) + '"/>\n    </row>\n';
     });
     xml += '</rows>\n';
@@ -490,7 +680,8 @@
   }
 
   const api = { qzWorkout: qzWorkout,
-    STRATEGIES: STRATEGIES, MP_IDS: MP_IDS, PARAM_DEFAULTS: PARAM_DEFAULTS, params: params, plan: plan, timeAt: timeAt,
+    STRATEGIES: STRATEGIES, MP_IDS: MP_IDS, LR_IDS: LR_IDS, LR_UI: LR_UI, ZONE_DEFAULTS: ZONE_DEFAULTS, ZONE_LABELS: ZONE_LABELS, ZONE_TAG: ZONE_TAG,
+    isMpLike: function (id) { return MP_IDS.indexOf(id) >= 0 || !!LR[id]; }, PARAM_DEFAULTS: PARAM_DEFAULTS, params: params, plan: plan, timeAt: timeAt,
     checkpoints: checkpoints, windows: windows, fmtT: fmtT, fmtSigned: fmtSigned, fmtKm: fmtKm, runs: runs, buildSegments: buildSegments
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

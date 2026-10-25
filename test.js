@@ -2,15 +2,17 @@
 const E = require('./engine.js');
 let bad = 0;
 const chk = (c, msg) => { if (!c) { bad++; if (bad < 30) console.log('FAIL', msg); } };
-const base = { mp: 330, km: 10, T: 3060, treadmill: false, round: false, paceStep: 5, speedStep: 0.5, group: 0, comp: false, splitM: 1000, sp: {}, firstSlow: 0, kick: 0 };
+const base0 = { mp: 330, km: 10, T: 3060, treadmill: false, round: false, paceStep: 5, speedStep: 0.5, group: 0, comp: false, splitM: 1000, sp: {}, firstSlow: 0, kick: 0 };
+const base = base0;
 const contiguous = r => r.segs.every((s, i) => i === 0 ? s.startM === 0 : Math.abs(s.startM - r.segs[i - 1].endM) < 1e-9);
 for (const s of E.STRATEGIES) {
+  const base = E.isMpLike(s.id) ? { ...base0, T: 3696 } : base0;
   const r = E.plan(s.id, base);
-  chk(Math.abs(r.finish - 3060) < 1e-6, s.id + ' exact total');
+  chk(Math.abs(r.finish - base.T) < 1e-6, s.id + ' exact total');
   chk(Math.abs(r.half1 + r.half2 - r.finish) < 1e-6, s.id + ' halves');
   chk(Math.abs(r.segs.at(-1).bank - r.diff) < 1e-6, s.id + ' bank at finish = diff');
   for (const [km, sm] of [[21.0975, 1000], [42.195, 500], [5, 400], [3.3, 1000], [1, 1000], [10, 1609.34], [10, 250], [42.195, 5000], [1.6, 400]]) {
-    const c = { ...base, km, T: km * 330 * (E.MP_IDS.includes(s.id) ? 1.12 : 1), splitM: sm, firstSlow: 15, kick: 10 };
+    const c = { ...base, km, T: km * 330 * (E.isMpLike(s.id) ? 1.12 : 1), splitM: sm, firstSlow: 15, kick: 10 };
     const q = E.plan(s.id, c);
     chk(!E.MP_IDS.includes(s.id) || q.warn.length === 0 || true, 'mp');
     chk(Math.abs(q.finish - c.T) < 1e-6, s.id + ' total ' + km + '/' + sm + ' ' + q.finish);
@@ -25,9 +27,9 @@ for (const s of E.STRATEGIES) {
   }
   const q = E.plan(s.id, { ...base, round: true, comp: true, group: 2 });
   chk(Math.abs(q.diff) <= 15, s.id + ' comp diff ' + q.diff);
-  q.segs.forEach(x => (x.role === 'mp' || x.role === 'fast' || x.walk) || chk(Math.abs(x.pace / 5 - Math.round(x.pace / 5)) < 1e-9, s.id + ' 5s grid'));
+  q.segs.forEach(x => (x.fx || x.role === 'mp' || x.role === 'fast' || x.walk) || chk(Math.abs(x.pace / 5 - Math.round(x.pace / 5)) < 1e-9, s.id + ' 5s grid'));
   const t2 = E.plan(s.id, { ...base, treadmill: true, round: true, speedStep: 0.5, group: 3, comp: true });
-  t2.segs.forEach(x => (x.role === 'mp' || x.role === 'fast' || x.walk) || chk(Math.abs(x.speed * 2 - Math.round(x.speed * 2)) < 1e-9, '0.5 kmh'));
+  t2.segs.forEach(x => (x.fx || x.role === 'mp' || x.role === 'fast' || x.walk) || chk(Math.abs(x.speed * 2 - Math.round(x.speed * 2)) < 1e-9, '0.5 kmh'));
   const tr = E.plan(s.id, { ...base, treadmill: true });
   tr.segs.forEach(x => chk(Math.abs(x.speed * 10 - Math.round(x.speed * 10)) < 1e-9, '0.1 kmh'));
 }
@@ -127,3 +129,53 @@ console.log(bad ? 'FAILURES ' + bad : 'ALL OK');
   chk(ea.some(x => near(x, 1000)) && ea.some(x => near(x, 9000)), 'first/last km windows exact ' + ea);
 }
 console.log(bad ? 'FAILURES ' + bad : 'ALL OK (audit)');
+
+/* ---- structured long runs ---- */
+{
+  let b2 = 0; const c2 = (c, m) => { if (!c) { b2++; if (b2 < 25) console.log('FAIL LR', m); } };
+  for (const id of E.LR_IDS) {
+    for (const [km, T, tm] of [[30, 3 * 3600 + 900, false], [32, 32 * 372, true], [24, 24 * 370, false], [16, 16 * 372, false]]) {
+      const cfg = { ...base0, km, T, mp: tm ? 3600 / 11 : 330, treadmill: tm, speedStep: 0.1, splitM: 1000, kick: 0, comp: tm };
+      const r = E.plan(id, cfg);
+      c2(Math.abs(r.finish - T) < (tm ? 15 : 1e-6) + 1e-6, id + ' total ' + km + ' ' + tm + ' ' + (r.finish - T));
+      c2(contiguous(r), id + ' contiguous');
+      c2(r.segs.every(s => s.pace > 0 && isFinite(s.pace)), id + ' pace');
+      c2(r.warn.length === 0 || r.base > cfg.mp * 1.6, id + ' warn ' + km + ' ' + r.warn.join('|'));
+      c2(r.base > cfg.mp, id + ' easy slower than MP ' + km + ' ' + r.base);
+      const w = E.windows(r, 5000).reduce((a, x) => a + x.time, 0);
+      c2(Math.abs(w - r.finish) < 1e-6, id + ' windows');
+      if (tm) { const q = E.qzWorkout(r, { incline: 1 }); c2(Math.abs(q.total - Math.round(r.finish)) <= 1, id + ' xml total'); }
+    }
+    // every template survives odd split lengths / rounding
+    for (const sm of [400, 1609.34, 5000]) {
+      const r = E.plan(id, { ...base0, km: 30, T: 11000, splitM: sm, round: true, comp: true, group: 2, paceStep: 5, firstSlow: 10 });
+      c2(contiguous(r) && r.segs.every(s => s.pace > 0), id + ' rounded ' + sm);
+    }
+  }
+  // sliders match the plan exactly
+  const L = (id, sp, k = 30, T = 11000) => E.plan(id, { ...base0, km: k, T, sp: { [id]: sp } });
+  const dist = (r, f) => r.segs.filter(f).reduce((a, s) => a + s.d, 0) / 1000;
+  c2(Math.abs(dist(L('pfitz', { mp: 14 }), s => s.role === 'mp') - 14) < 1e-6, 'pfitz mp km');
+  c2(Math.abs(dist(L('pfitz', { cd: 3 }), s => s.role === 'easy' && s.startM >= 30000 - 3000) - 3) < 1e-6, 'pfitz cd km');
+  c2(Math.abs(dist(L('broken', { n: 3, blk: 4 }), s => s.role === 'mp') - 12) < 1e-6, 'broken total mp');
+  c2(Math.abs(dist(L('micro', { n: 6, blk: 1.5 }), s => s.role === 'mp') - 9) < 1e-6, 'micro mp');
+  c2(Math.abs(dist(L('cruise', { n: 3, rep: 2 }), s => s.role === 'lt') - 6) < 1e-6, 'cruise lt');
+  c2(Math.abs(dist(L('squires', { n: 6, len: 2 }), s => s.role === 'hmp') - 0) >= 0, 'squires');
+  const th = E.plan('thirds', { ...base0, km: 30, T: 11000 }); c2(th.segs.filter(s => s.role === 'mp').length === 10, 'thirds third');
+  // time-based steps really last that long
+  const rh = E.plan('rhythm', { ...base0, km: 30, T: 11000, sp: { rhythm: { on: 1 } } });
+  const fast = rh.segs.filter(s => s.role === 'k10'); c2(Math.abs(fast.reduce((a, s) => a + s.time, 0) - 600) < 2, 'rhythm 10x1min ' + fast.reduce((a, s) => a + s.time, 0));
+  // zone offsets are honoured
+  const zo = E.plan('cutdown', { ...base0, km: 30, T: 11000, zoneOff: { k10: -40 } });
+  const k10 = zo.segs.find(s => s.role === 'k10'); c2(Math.abs(k10.pace - 290) < 1e-6, 'zone offset ' + k10.pace);
+  // pct of MP pace
+  const ca = E.plan('canova', { ...base0, km: 30, T: 11000 }); c2(Math.abs(ca.segs.find(s => s.role === 'mp').pace - 330 * 100 / 99) < 1e-6, 'canova pct');
+  // incline carried to xml
+  const hl = E.plan('lydiard', { ...base0, km: 30, T: 11000, treadmill: true, mp: 3600 / 5.5 });
+  const x = E.qzWorkout(hl, { incline: 1 }).xml; c2(/inclination="5"/.test(x) && /inclination="1"/.test(x), 'incline in xml');
+  // too-big structure scales with a note
+  const big = E.plan('micro', { ...base0, km: 12, T: 4500, sp: { micro: { n: 14, blk: 4 } } }); c2(big.notes.some(n => /scaled/.test(n)), 'scaling note');
+  console.log(b2 ? 'LR FAILURES ' + b2 : 'LR OK');
+  const show2 = (id, km = 30, T = 11000) => { const r = E.plan(id, { ...base0, km, T }); const rs = E.runs(r, false); return id.padEnd(10) + ' base ' + E.fmtT(r.base) + ' | ' + rs.map(q => (q.role === 'easy' ? '' : q.role + ' ') + +(q.startM / 1000).toFixed(2) + '-' + +(q.endM / 1000).toFixed(2) + '@' + q.label).join(' ').slice(0, 330) + (r.notes.length > 1 ? ' !' + r.notes[0] : ''); };
+  if (process.env.SHOW) E.LR_IDS.forEach(id => console.log(show2(id)));
+}

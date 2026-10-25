@@ -162,3 +162,14 @@ td small { color: var(--ink3); font-weight: 400; font-size: .75rem; }
 .mpbox .hint { margin: 0 0 4px; }
 .warn { margin: 0 0 12px; padding: 10px 12px; border: 1px solid var(--s8); border-radius: 8px; font-size: .9rem; }
 .plan li.mpr { border-color: var(--ink); }
+
+details.grp { margin: 0 0 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+details.grp > summary { padding: 11px 12px; cursor: pointer; font-weight: 600; font-size: .85rem; color: var(--ink2); }
+details.grp > summary .count { font-weight: 400; color: var(--ink3); margin-left: 6px; }
+details.grp > .chips { margin: 0; padding: 0 12px 12px; }
+details.zones { margin-top: 8px; }
+details.zones > summary { cursor: pointer; font-weight: 600; font-size: .85rem; padding: 6px 0; }
+.zgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 8px 0 10px; }
+.zgrid label { display: grid; gap: 3px; font-size: .8rem; min-width: 0; }
+.zgrid input { width: 100%; min-width: 0; }
+.zgrid small { color: var(--ink3); }

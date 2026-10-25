@@ -11,7 +11,7 @@
     sp: {},      // per-strategy settings
     view: {},    // per-card chart view: 'pace' | 'bank'
     tview: 'split', // table rows: 'split' | 'km' | '5k'
-    incline: 0, mp: 330,
+    incline: 0, mp: 330, zoneOff: Object.assign({}, E.ZONE_DEFAULTS),
     slots: {}    // strategy -> colour slot 1..8, kept while selected
   };
   var STRATS = E.STRATEGIES;
@@ -66,6 +66,17 @@
     ]
   };
 
+  /* Long-run structures: sliders come straight from the engine's template definitions. */
+  var UF = {
+    km: function (v) { return v + ' km'; }, min: function (v) { return v + (v === 1 ? ' min' : ' min'); }, s: function (v) { return v + ' s'; },
+    x: function (v) { return v; }, pct: function (v) { return v + '%'; }, pctmp: function (v) { return v + '% of MP speed'; },
+    pcti: function (v) { return v + '% incline'; }, fl: function (v) { return +v ? 'float' : 'easy jog'; }, z2: function (v) { return +v ? '10K pace' : 'half-marathon pace'; },
+    off: function (v) { return 'MP' + (v >= 0 ? '+' : '\u2212') + Math.abs(v) + ' s/km'; }
+  };
+  E.LR_IDS.forEach(function (id) {
+    TUNE[id] = E.LR_UI[id].map(function (u) { return { k: u[0], label: u[1], min: u[2], max: u[3], step: u[4], fmt: UF[u[5]] || UF.x }; });
+  });
+
   function clone(o) { return JSON.parse(JSON.stringify(o)); }
   function merge(into, from) { for (var k in from) if (k in into) into[k] = from[k]; return into; }
   function load() {
@@ -116,7 +127,7 @@
   function cfg() {
     return {
       km: st.km, T: targetSec(), treadmill: tm(), round: st.round, paceStep: st.paceStep, speedStep: st.speedStep,
-      group: st.group, comp: st.comp, splitM: st.splitM, sp: st.sp, mp: st.mp, firstSlow: st.firstSlow, kick: st.kick
+      group: st.group, comp: st.comp, splitM: st.splitM, sp: st.sp, mp: st.mp, zoneOff: st.zoneOff, firstSlow: st.firstSlow, kick: st.kick
     };
   }
 
@@ -128,21 +139,30 @@
     $('paceStep').value = st.paceStep; $('speedStep').value = st.speedStep; $('group').value = st.group;
     $('incline').value = st.incline; $('firstSlow').value = st.firstSlow; $('kick').value = st.kick;
     var box = $('strats'), html = '';
-    [['race', 'Race pacing'], ['workout', 'Workouts'], ['marathon', 'Marathon-pace templates']].forEach(function (g) {
-      html += '<h3 class="sub-h">' + g[1] + '</h3>';
+    [['race', 'Race pacing'], ['workout', 'Workouts'], ['marathon', 'Marathon-pace templates'], ['lrmp', 'Marathon-pace long runs'], ['lrot', 'Other long-run workouts']].forEach(function (g) {
+      var fold = g[0] === 'lrmp' || g[0] === 'lrot';
+      var any = STRATS.some(function (s) { return s.group === g[0] && st.sel.indexOf(s.id) >= 0; });
+      var cnt = STRATS.filter(function (s) { return s.group === g[0]; }).length;
+      if (fold) html += '<details class="grp"' + (any ? ' open' : '') + '><summary>' + g[1] + ' <span class="count">' + cnt + ' structures</span></summary>';
+      else html += '<h3 class="sub-h">' + g[1] + '</h3>';
       if (g[0] === 'marathon') html += '<div class="mpbox"><span class="lbl" id="l-mp">Your target marathon pace</span><div class="time two">' +
         '<label><input id="mpm" type="number" inputmode="numeric" min="2" max="15" aria-label="Marathon pace minutes"><span>min</span></label>' +
         '<label><input id="mps" type="number" inputmode="numeric" min="0" max="59" placeholder="0" aria-label="Marathon pace seconds"><span>sec /km</span></label></div>' +
         '<div class="time one" id="mpSpeed" hidden><label><input id="mpk" type="number" inputmode="decimal" step="0.1" min="4" max="30" aria-label="Marathon speed in km per hour"><span>km/h</span></label></div>' +
-        '<p class="hint" id="mpOut"></p><p class="hint">These parts keep exactly this pace. The easy parts adjust so the whole run still matches your distance and goal time.</p></div>';
+        '<p class="hint" id="mpOut"></p><p class="hint">These parts keep exactly this pace. The easy parts adjust so the whole run still matches your distance and goal time.</p>' +
+        '<details class="zones"><summary>Pace zones for the long-run structures</summary>' +
+        '<p class="hint">Each zone is set against your marathon pace, in seconds per km. Negative is faster. The long-run workouts below use these.</p><div class="zgrid">' +
+        Object.keys(E.ZONE_LABELS).map(function (k) {
+          return '<label><span>' + E.ZONE_LABELS[k] + '</span><input id="zo-' + k + '" type="number" inputmode="numeric" step="1" min="-120" max="120" aria-label="' + E.ZONE_LABELS[k] + ' offset in seconds per km"><small id="zoo-' + k + '"></small></label>';
+        }).join('') + '</div><button type="button" class="btn" id="zoreset">Reset zones</button></details></div>';
       html += '<div class="chips strat" role="group" aria-label="' + g[1] + '">';
       STRATS.forEach(function (s) {
         if (s.group === g[0]) html += '<button type="button" data-id="' + s.id + '"><span class="dot"></span>' + s.name + '</button>';
       });
-      html += '</div>';
+      html += '</div>' + (fold ? '</details>' : '');
     });
     box.innerHTML = html;
-    setMpFields();
+    setMpFields(); setZoneFields();
     syncUi();
   }
   /* Show the goal in all three forms. The goal time st.T stays the source of truth. */
@@ -150,6 +170,9 @@
   function setMpFields(skip) {
     if (skip !== 'pace') { $('mpm').value = Math.floor(st.mp / 60); $('mps').value = Math.round(st.mp % 60) || ''; }
     if (skip !== 'speed') $('mpk').value = Math.round(3600 / st.mp * 10) / 10;
+  }
+  function setZoneFields() {
+    Object.keys(E.ZONE_LABELS).forEach(function (k) { $('zo-' + k).value = st.zoneOff[k] != null ? st.zoneOff[k] : E.ZONE_DEFAULTS[k]; });
   }
   function setGoalFields(T) {
     if (!(T > 0) || !(st.km > 0)) return;
@@ -175,6 +198,10 @@
     $('compWrap').hidden = !(st.round || tm());
     $('mpm').closest('.time').hidden = tm(); $('mpSpeed').hidden = !tm();
     $('mpOut').textContent = 'Marathon at this pace: ' + E.fmtT(st.mp * 42.195) + ' · ' + (tm() ? E.fmtT(st.mp) + ' /km' : (3600 / st.mp).toFixed(1) + ' km/h');
+    Object.keys(E.ZONE_LABELS).forEach(function (k) {
+      var off = st.zoneOff[k] != null ? st.zoneOff[k] : E.ZONE_DEFAULTS[k], pc = st.mp + off;
+      $('zoo-' + k).textContent = pc > 0 ? (tm() ? (3600 / pc).toFixed(1) + ' km/h' : E.fmtT(pc) + ' /km') : '';
+    });
     $('firstOut').textContent = st.firstSlow; $('kickOut').textContent = st.kick;
   }
   function num(id, def) { var v = parseFloat($(id).value); return isFinite(v) ? v : def; }
@@ -286,7 +313,7 @@
     var halfNote = Math.abs(hd) < 0.5 ? 'even halves' : (hd < 0 ? 'negative by ' : 'positive by ') + E.fmtT(Math.abs(hd));
 
     var runs = E.runs(r, tm()).map(function (x) {
-      return '<li' + (x.walk ? ' class="walk"' : (x.role === 'mp' ? ' class="mpr"' : '')) + '>' + kmTxt(x.startM) + '–' + kmTxt(x.endM) + ' km · ' + (x.walk ? 'walk ' : '') + (x.role === 'mp' ? 'MP ' : '') + '<b>' + x.label + '</b> ' + unit() + ' · until ' + E.fmtT(x.endT) + '</li>';
+      return '<li' + (x.walk ? ' class="walk"' : (E.ZONE_TAG[x.role] ? ' class="mpr"' : '')) + '>' + kmTxt(x.startM) + '–' + kmTxt(x.endM) + ' km · ' + (x.walk ? 'walk ' : '') + (E.ZONE_TAG[x.role] ? E.ZONE_TAG[x.role] + ' ' : '') + '<b>' + x.label + '</b> ' + unit() + (tm() && x.incline != null ? ' @ ' + x.incline + '% incline' : '') + ' · until ' + E.fmtT(x.endT) + '</li>';
     }).join('');
     var cps = E.checkpoints(r);
     var cpHtml = cps.length ? '<div class="cp"><h4>Checkpoints</h4><ul class="plan">' + cps.map(function (c) {
@@ -316,7 +343,7 @@
 
     var notes = (r.notes || []).map(function (w) { return '<p class="note">' + esc(w) + '</p>'; }).join('');
     var warn = notes + (r.warn || []).map(function (w) { return '<p class="warn" role="note">' + esc(w) + '</p>'; }).join('');
-    var easy = E.MP_IDS.indexOf(id) >= 0 && !r.warn.length ? stat('Easy parts', pv(r.base)) : '';
+    var easy = E.isMpLike(id) && !r.warn.length ? stat('Easy parts', pv(r.base)) : '';
     return warn + '<dl class="stats">' +
       stat('Finish', E.fmtT(r.finish)) + stat('Vs goal', delta) + stat('Average', pv(r.avgPace)) +
       stat('Fastest', pv(r.fastest)) + stat('Slowest', pv(r.slowest)) + easy +
@@ -511,6 +538,12 @@
       save(); updateCard(id);
       return;
     }
+    if (t.id && t.id.indexOf('zo-') === 0) {
+      var zk = t.id.slice(3), zv = parseFloat(t.value);
+      st.zoneOff[zk] = isFinite(zv) ? Math.max(-120, Math.min(120, zv)) : 0;
+      render();
+      return;
+    }
     if (t.closest && t.closest('main')) {
       var oldKm = st.km;
       readInputs();
@@ -550,6 +583,7 @@
     else if (b.dataset.tview) { st.tview = b.dataset.tview; render(); }
     else if (b.dataset.view) { st.view[b.dataset.card] = b.dataset.view; save(); updateCard(b.dataset.card); }
     else if (b.dataset.resetstrat) { delete st.sp[b.dataset.resetstrat]; ui.tuneOpen[b.dataset.resetstrat] = true; render(); }
+    else if (b.id === 'zoreset') { st.zoneOff = Object.assign({}, E.ZONE_DEFAULTS); setZoneFields(); render(); }
     else if (b.closest('#strats')) {
       var i = st.sel.indexOf(b.dataset.id);
       if (i >= 0) st.sel.splice(i, 1); else st.sel.push(b.dataset.id);

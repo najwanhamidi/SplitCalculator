@@ -6,6 +6,10 @@ A mobile-friendly web app (installable PWA, works offline) that turns a distance
 
 **Marathon-pace templates** (set your target marathon pace; those parts keep exactly that pace and the easy parts adjust so distance and goal time still match): marathon-pace block (one or several blocks), marathon-pace finish, marathon pace to faster, and marathon-pace repeats (choose the number of blocks; block length fills the run so there are no leftover slivers). A warning appears if the goal can't fit, e.g. it would need the easy parts faster than marathon pace.
 
+**Long-run structures** (30 templates from the marathon-pace and other long-run workout guides, each with its own sliders). *Marathon-pace long runs:* Pfitzinger classic, McMillan fast-finish, MP sandwich, mid-run belly block, classic broken MP reps, descending MP ladder, MP micro-blocks, Daniels M-T-M, Canova over/under, on/off float, 1K/1K ratchet, thirds progression, step-down cutdown, Squires surge long run. *Other long runs:* sub-threshold embedded, bookend threshold sandwich, late-run cruise intervals, Daniels T-L-T, multi-stage cutdown pyramid, kitchen sink hybrid, alternating wave, road Michigan, 1/4 rhythm disrupter, Deek 5-on/5-off, Kenyan ladder fartlek, double Mona fartlek, HMP destroyer, fast-finish sub-threshold grind, hill-to-threshold, Lydiard hill circuit.
+
+All zones are set from your marathon pace. Edit the offsets (steady, float, sub-threshold, threshold, half-marathon, 10K, 5K) under *Pace zones* in the marathon-pace box. Easy parts share one pace that is solved so distance and goal time still match. Time-based steps (e.g. 90 s) last exactly that long. Hill steps carry an incline on the treadmill, which goes into the QZ XML. If a structure is longer than the run, it is scaled down and a note says so.
+
 **Workouts**: alternating pyramids (any number of pyramids, optionally flipping direction each time), progression run, fast-finish long run, tempo run, alternating, fartlek, pyramid, stair steps, interval style, ladder intervals, steady with surges, tempo sandwich, and run-walk (Galloway-style walk breaks at a set walking pace).
 
 **Setup**
