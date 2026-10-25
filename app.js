@@ -11,11 +11,12 @@
     sp: {},      // per-strategy settings
     view: {},    // per-card chart view: 'pace' | 'bank'
     tview: 'split', // table rows: 'split' | 'km' | '5k'
+    incline: 0,
     slots: {}    // strategy -> colour slot 1..8, kept while selected
   };
   var STRATS = E.STRATEGIES;
   var st = load();
-  var ui = { tuneOpen: {}, tableClosed: {} };   // per-session UI state, not saved
+  var ui = { tuneOpen: {}, tableClosed: {}, expOpen: {} };   // per-session UI state, not saved
   var last = {};                                 // latest plan per strategy (for hover/copy)
 
   /* Per-strategy controls shown in each card's "Adjust" panel. */
@@ -171,7 +172,7 @@
     $('splitM').value = st.splitM;
     $('round').checked = st.round; $('comp').checked = st.comp;
     $('paceStep').value = st.paceStep; $('speedStep').value = st.speedStep; $('group').value = st.group;
-    $('firstSlow').value = st.firstSlow; $('kick').value = st.kick;
+    $('incline').value = st.incline; $('firstSlow').value = st.firstSlow; $('kick').value = st.kick;
     var box = $('strats'), html = '';
     [['race', 'Race pacing'], ['workout', 'Workouts']].forEach(function (g) {
       html += '<h3 class="sub-h">' + g[1] + '</h3><div class="chips strat" role="group" aria-label="' + g[1] + '">';
@@ -215,6 +216,7 @@
     st.round = $('round').checked; st.comp = $('comp').checked;
     st.paceStep = +$('paceStep').value; st.speedStep = +$('speedStep').value; st.group = +$('group').value;
     st.firstSlow = +$('firstSlow').value; st.kick = +$('kick').value;
+    st.incline = Math.min(15, Math.max(0, num('incline', 0)));
   }
 
   /* ---------- rendering ---------- */
@@ -281,6 +283,33 @@
   }
   function currentView(tv) { return tv.filter(function (v) { return v.k === st.tview; })[0] || tv[0]; }
 
+  /* Treadmill plan used for the QZ workout file: speeds always on the 0.1 km/h grid, time kept on target. */
+  function exportPlan(id) {
+    var c = cfg();
+    if (!c.treadmill) { c.treadmill = true; c.comp = true; c.speedStep = 0.1; }
+    return E.plan(id, c);
+  }
+  function exportHtml(id) {
+    var q = E.qzWorkout(exportPlan(id), { incline: st.incline });
+    return '<details class="tune export" data-exp="' + id + '"' + (ui.expOpen[id] ? ' open' : '') + '><summary>Export to QZ workout (.xml)</summary>' +
+      '<p class="hint">For qdomyos-zwift treadmill workouts: ' + q.rows.length + ' intervals, ' + E.fmtT(q.total) + ' total' +
+      (tm() ? '.' : '. Speeds snap to 0.1 km/h, and time is kept on target, so a few intervals may differ slightly from the outdoor paces shown.') + '</p>' +
+      '<div class="actions"><button type="button" class="btn" data-dl="' + id + '">Download .xml</button>' +
+      '<button type="button" class="btn" data-copyxml="' + id + '">Copy XML</button></div></details>';
+  }
+  function fileName(id) {
+    var T = E.fmtT(targetSec()).replace(/:/g, '-');
+    return (nameOf(id) + '_' + (Math.round(st.km * 100) / 100) + 'km_' + T).replace(/[^A-Za-z0-9_.-]+/g, '_') + '.xml';
+  }
+  function download(id) {
+    var q = E.qzWorkout(exportPlan(id), { incline: st.incline });
+    var blob = new Blob([q.xml], { type: 'application/xml' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = fileName(id);
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000);
+  }
+
   function bodyHtml(r) {
     var id = r.id;
     var d = Math.round(r.diff);
@@ -330,6 +359,7 @@
       '<details class="tbl" data-tbl="' + id + '"' + (ui.tableClosed[id] ? '' : ' open') + '><summary>Split table (' + tr.length + ' rows, ' + cur.label.toLowerCase() + ')</summary>' + tvSeg + '<div class="tablewrap"><table><thead><tr>' + head + '</tr></thead><tbody>' + rows + '</tbody></table></div>' +
       (anyMixed ? '<p class="note">avg: the pace changes inside this row, so the value shown is the average. The pace plan above lists every change.</p>' : '') +
       '<p class="note">Vs even: time behind (+) or ahead (−) of running the goal at a perfectly even pace.</p></details>' +
+      exportHtml(id) +
       '<div class="actions"><button type="button" class="btn" data-copy="' + id + '">Copy plan</button></div>';
   }
 
@@ -528,6 +558,7 @@
   document.addEventListener('toggle', function (e) {
     var d = e.target;
     if (d.dataset && d.dataset.tune) ui.tuneOpen[d.dataset.tune] = d.open;
+    if (d.dataset && d.dataset.exp) ui.expOpen[d.dataset.exp] = d.open;
     if (d.dataset && d.dataset.tbl) ui.tableClosed[d.dataset.tbl] = !d.open;
   }, true);
   document.addEventListener('pointermove', hover);
@@ -541,6 +572,8 @@
     } else if (b.dataset.split) { st.splitM = +b.dataset.split; $('splitM').value = st.splitM; render(); }
     else if (b.dataset.goal) { st.goal = b.dataset.goal; setGoalFields(st.T); render(); }
     else if (b.dataset.mode) { st.mode = b.dataset.mode; render(); }
+    else if (b.dataset.dl) { download(b.dataset.dl); }
+    else if (b.dataset.copyxml) { copy(b, E.qzWorkout(exportPlan(b.dataset.copyxml), { incline: st.incline }).xml, 'Copy XML'); }
     else if (b.dataset.tview) { st.tview = b.dataset.tview; render(); }
     else if (b.dataset.view) { st.view[b.dataset.card] = b.dataset.view; save(); updateCard(b.dataset.card); }
     else if (b.dataset.resetstrat) { delete st.sp[b.dataset.resetstrat]; ui.tuneOpen[b.dataset.resetstrat] = true; render(); }
@@ -554,7 +587,7 @@
       var url = location.href.split('#')[0] + '#s=' + encodeURIComponent(btoa(JSON.stringify(st)));
       copy(b, url, 'Copy share link');
     } else if (b.id === 'reset') {
-      st = clone(DEFAULTS); ui = { tuneOpen: {}, tableClosed: {} }; fill(); render();
+      st = clone(DEFAULTS); ui = { tuneOpen: {}, tableClosed: {}, expOpen: {} }; fill(); render();
     }
   });
 

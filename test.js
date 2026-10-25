@@ -39,3 +39,13 @@ console.log('400m split per km:', E.windows(E.plan('alternating', { ...base, spl
 console.log(bad ? 'FAILURES ' + bad : 'ALL OK');
 for (const id of ['controlled', 'sitkick', 'midsurge', 'blocks3', 'ladder', 'surges', 'sandwich']) console.log(id.padEnd(11), show(id, { km: 15, T: 15 * 306 }));
 console.log('ladder 400m:', E.plan('ladder', { ...base, splitM: 400 }).segs.map(s => s.pace < 300 ? 'H' : 'e').join(''));
+// QZ workout export
+for (const s of E.STRATEGIES) {
+  const r = E.plan(s.id, { ...base, treadmill: true, comp: true, speedStep: 0.1, firstSlow: 10, kick: 5 });
+  const q = E.qzWorkout(r, { incline: 1 });
+  chk(Math.abs(q.total - Math.round(r.finish)) <= 1, s.id + ' qz total ' + q.total + ' vs ' + r.finish);
+  chk(q.rows.every(x => Math.abs(x.speed * 10 - Math.round(x.speed * 10)) < 1e-9 && x.dur > 0), s.id + ' qz rows');
+  chk(/^<\?xml/.test(q.xml) && q.xml.split('<row ').length - 1 === q.rows.length, s.id + ' qz xml shape');
+}
+console.log(E.qzWorkout(E.plan('negative', { ...base, treadmill: true, speedStep: 0.1 })).xml);
+console.log(bad ? 'FAILURES ' + bad : 'ALL OK');

@@ -337,7 +337,32 @@
     return out;
   }
 
-  const api = {
+  /* qdomyos-zwift treadmill workout XML. Rows are merged runs of equal speed; durations are whole
+     seconds rounded on the cumulative clock so the total never drifts. res must be a treadmill plan. */
+  function qzWorkout(res, opts) {
+    opts = opts || {};
+    const incline = opts.incline || 0;
+    const esc = function (t) { return String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;'); };
+    const hms = function (s) {
+      const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), r = s % 60, p = function (n) { return (n < 10 ? '0' : '') + n; };
+      return p(h) + ':' + p(m) + ':' + p(r);
+    };
+    const rows = runs(res, true).map(function (x, i) {
+      const speed = +x.label;
+      const dur = Math.round(x.endT) - Math.round(x.startT);
+      const msg = 'Interval ' + (i + 1) + (x.walk ? ' walk' : '') + ' (' + fmtKm(x.startM) + '-' + fmtKm(x.endM) + ' km)';
+      return { dur: dur, speed: speed, msg: msg };
+    }).filter(function (r) { return r.dur > 0; });
+    let xml = '<?xml version="1.0" encoding="UTF-8"?>\n<rows device="treadmill">\n';
+    rows.forEach(function (r) {
+      xml += '    <row duration="' + hms(r.dur) + '" speed="' + r.speed + '" inclination="' + incline + '" forcespeed="1" looptimehr="10">\n' +
+        '        <textevent timeoffset="0" message="' + esc(r.msg) + '"/>\n    </row>\n';
+    });
+    xml += '</rows>\n';
+    return { xml: xml, rows: rows, total: rows.reduce(function (a, r) { return a + r.dur; }, 0) };
+  }
+
+  const api = { qzWorkout: qzWorkout,
     STRATEGIES: STRATEGIES, PARAM_DEFAULTS: PARAM_DEFAULTS, params: params, plan: plan, timeAt: timeAt,
     checkpoints: checkpoints, windows: windows, fmtT: fmtT, fmtSigned: fmtSigned, fmtKm: fmtKm, runs: runs, buildSegments: buildSegments
   };

@@ -149,3 +149,6 @@ main > *, .card, .body { min-width: 0; }
 .strat button[aria-pressed=false] .dot { box-shadow: inset 0 0 0 2px var(--ink3); }
 .plan li.walk { border-style: dashed; }
 td small { color: var(--ink3); font-weight: 400; font-size: .75rem; }
+.tune.export { margin-top: 12px; }
+.tune.export .actions { margin-top: 4px; }
+#expOpts input { max-width: 160px; }
