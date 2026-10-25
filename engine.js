@@ -62,7 +62,7 @@
     mplong: { start: 25, len: 50, n: 1, rest: 1 },
     mpfinish: { len: 40 },
     mpbuild: { easy: 30, mpl: 40, v: 4 },
-    mpintervals: { v: 0, n: 3, blk: 0, rest: 1, wu: 3, cd: 2 }
+    mpintervals: { v: 0, n: 3, blkLen: 0, rest: 1, wu: 3, cd: 2 }
   };
   function params(id, sp) {
     return Object.assign({}, PARAM_DEFAULTS[id] || {}, (sp && sp[id]) || {});
@@ -77,18 +77,23 @@
   function mpBlocks(T, n, rest, blk, wu, cd) {
     const notes = [];
     n = Math.max(1, Math.round(n)); rest = Math.max(0, rest); wu = Math.max(0, wu); cd = Math.max(0, cd);
-    const minBlk = 0.5;
-    let b = blk > 0 ? blk : 0;
-    const asked = n;
-    if (b > 0) {
-      while (n > 1 && n * b + (n - 1) * rest > T) n--;
-      if (n * b + (n - 1) * rest > T) b = T;
-      const left = Math.max(0, T - n * b - (n - 1) * rest), r = wu + cd > 0 ? wu / (wu + cd) : 0.5;
-      wu = left * r; cd = left - wu;
+    const minBlk = 0.5, asked = n, wuAsked = wu, cdAsked = cd;
+    let b = blk > 0 ? blk : 0, fixedLen = b > 0;
+    if (fixedLen) {
+      // Block length is fixed: warm-up stays as set, the cool-down takes whatever is left.
+      while (n > 1 && wu + n * b + (n - 1) * rest > T) n--;
+      if (wu + n * b + (n - 1) * rest > T) wu = Math.max(0, T - n * b - (n - 1) * rest);
+      if (wu + n * b + (n - 1) * rest > T) b = Math.max(0.1, (T - wu - (n - 1) * rest) / n);
+      cd = Math.max(0, T - wu - n * b - (n - 1) * rest);
+      if (Math.abs(cd - cdAsked) > 0.05) notes.push('With a fixed block length the cool-down takes the rest of the run: ' + (Math.round(cd * 10) / 10) + ' km.');
     } else {
+      // Block length is automatic: warm-up, cool-down and recoveries stay as set, blocks fill the rest.
       while (n > 1 && T - (n - 1) * rest - n * minBlk < 0) n--;
       const room = Math.max(0, T - (n - 1) * rest - n * minBlk);
-      if (wu + cd > room) { const k = wu + cd > 0 ? room / (wu + cd) : 0; wu *= k; cd *= k; }
+      if (wu + cd > room) {
+        const k = wu + cd > 0 ? room / (wu + cd) : 0; wu *= k; cd *= k;
+        notes.push('Warm-up and cool-down were shortened to ' + (Math.round(wu * 10) / 10) + ' km and ' + (Math.round(cd * 10) / 10) + ' km to fit the blocks.');
+      }
       b = (T - (n - 1) * rest - wu - cd) / n;
     }
     if (n < asked) notes.push('Only ' + n + ' block' + (n > 1 ? 's' : '') + ' fit in this distance.');
@@ -96,11 +101,13 @@
   }
 
   /* Fixed-pace zones for marathon-pace templates: [startM, endM, role]. Roles: mp, fast, wu, cd, rec. */
+  /* Fixed-pace zones for marathon-pace templates: [startM, endM, role]. Roles: mp, fast, wu, cd, rec. */
   function zonesFor(id, totalM, p) {
     const z = [], f = totalM / 100, notes = [];
     if (id === 'mplong') {
       // n MP blocks spread over the chosen stretch, easy gaps between them
       const a = p.start * f, L = Math.min(100 - p.start, p.len) * f / 1000;
+      if (p.start + p.len > 100) notes.push('The marathon-pace stretch was shortened to end at the finish.');
       const L1 = Math.max(L, 0.1);
       const lay = mpBlocks(L1, p.n, p.rest, 0, 0, 0);
       notes.push.apply(notes, lay.notes);
@@ -117,7 +124,7 @@
       if (p.easy + p.mpl < 100) z.push([(p.easy + p.mpl) * f, totalM, 'fast']);
     }
     if (id === 'mpintervals') {
-      const lay = mpBlocks(totalM / 1000, p.n, p.rest, p.blk, p.wu, p.cd);
+      const lay = mpBlocks(totalM / 1000, p.n, p.rest, p.blkLen, p.wu, p.cd);
       notes.push.apply(notes, lay.notes);
       let pos = 0;
       if (lay.wu > 0.001) { z.push([0, lay.wu * 1000, 'wu']); pos = lay.wu * 1000; }
@@ -132,8 +139,27 @@
     return { zones: z, notes: notes };
   }
 
-  function segmentsFor(id, totalM, splitM, p) {
+  /* Exact boundaries (as fractions of the run) for settings given as a percentage, so the plan changes
+     where the setting says, not at the nearest split. */
+  function fracCuts(id, p) {
+    switch (id) {
+      case 'negative': return [p.at / 100];
+      case 'controlled': return [p.first / 100];
+      case 'sitkick': case 'fastfinish': return [1 - p.last / 100];
+      case 'midsurge': return [p.at / 100 - p.len / 200, p.at / 100 + p.len / 200];
+      case 'blocks3': return [p.a / 100, (p.a + p.b) / 100];
+      case 'tempo': return [p.wu / 100, 1 - p.cd / 100];
+      case 'sandwich': { const wu = p.wu / 100, cd = p.cd / 100, md = p.mid / 100, c = (wu + 1 - cd) / 2; return [wu, 1 - cd, c - md / 2, c + md / 2]; }
+      case 'stairs': { const k = Math.max(2, Math.round(p.steps)), o = []; for (let i = 1; i < k; i++) o.push(i / k); return o; }
+      case 'pyramid': case 'pyramids': { const c = Math.max(1, Math.round(p.count || 1)), o = []; for (let i = 1; i < c; i++) o.push(i / c); return o; }
+      default: return [];
+    }
+  }
+
+  function segmentsFor(id, totalM, splitM, p, extra) {
     const cuts = [0, totalM];
+    fracCuts(id, p).forEach(function (f) { if (f > 0 && f < 1) cuts.push(f * totalM); });
+    (extra || []).forEach(function (c) { if (c > 0 && c < totalM) cuts.push(c); });
     const zones = zonesFor(id, totalM, p).zones;
     zones.forEach(function (z) { cuts.push(z[0], z[1]); });
     for (let pos = splitM; pos < totalM - 0.5; pos += splitM) cuts.push(pos);
@@ -292,7 +318,8 @@
     const p = params(id, cfg.sp);
     const mp = cfg.mp > 0 ? cfg.mp : 330;
     const totalM = Math.round(cfg.km * 1000);
-    const segs = segmentsFor(id, totalM, cfg.splitM, p);
+    const win0 = Math.min(1000, totalM / 3);
+    const segs = segmentsFor(id, totalM, cfg.splitM, p, [cfg.firstSlow ? win0 : 0, cfg.kick ? totalM - win0 : 0]);
     const m = multipliers(id, segs, totalM, p);
     segs.forEach(function (s) {
       if (s.walk) s.fixedPace = p.wp;
@@ -364,6 +391,9 @@
     }
     res.warn = w;
     res.notes = MP_IDS.indexOf(id) >= 0 ? zonesFor(id, totalM, p).notes : [];
+    if ((id === 'interval' && segs.length < Math.max(0, p.wu) + Math.max(0, p.cd) + 2) || (id === 'ladder' && segs.length < Math.max(0, p.wu) + Math.max(0, p.cd) + 3)) {
+      res.notes.push('Too few splits for the warm-up and cool-down you set, so easy and hard splits simply alternate. Use a shorter split length.');
+    }
     res.half1 = timeAt(res, totalM / 2);
     res.half2 = cum - res.half1;
     return res;

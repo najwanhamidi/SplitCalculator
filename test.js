@@ -88,3 +88,42 @@ console.log('10 km, 6 blocks asked:', e5.notes.join(' '));
 const ml = E.plan('mplong', { ...base, km: 30, T: 3 * 3600, sp: { mplong: { n: 3, rest: 1, start: 20, len: 60 } } });
 console.log('mplong 3 blocks:', ml.notes.join(' '), E.runs(ml, false).map(x => (x.role || 'easy') + ' ' + E.fmtKm(x.startM) + '-' + E.fmtKm(x.endM)).join(' | '));
 console.log(bad ? 'FAILURES ' + bad : 'ALL OK');
+
+// ---- Audit: every setting shows up in the plan exactly as set ----
+{
+  const near = (a, b, tol = 1) => Math.abs(a - b) <= tol;
+  const roles = (r) => { const z = []; r.segs.forEach(x => { const l = z[z.length - 1]; if (l && l.role === x.role) l.end = x.endM; else z.push({ role: x.role, start: x.startM, end: x.endM }); }); return z; };
+  const edges = (r) => { const e = []; r.segs.forEach((x, i) => { if (i > 0 && Math.abs(x.pace - r.segs[i - 1].pace) > 1e-6) e.push(x.startM); }); return e; };
+  const cfgA = { ...base, km: 10, T: 3300, splitM: 1000 };
+  // Percentage changes land exactly on the set distance, even mid-split
+  const cases = [
+    ['controlled', { first: 15 }, [1500]], ['sitkick', { last: 8 }, [9200]], ['fastfinish', { last: 25 }, [7500]],
+    ['negative', { at: 35 }, [3500]], ['midsurge', { at: 50, len: 15 }, [4250, 5750]], ['blocks3', { a: 38, b: 38 }, [3800, 7600]],
+    ['tempo', { wu: 15, cd: 10 }, [1500, 9000]], ['stairs', { steps: 4 }, [2500, 5000, 7500]]
+  ];
+  for (const [id, prm, want] of cases) {
+    const r = E.plan(id, { ...cfgA, sp: { [id]: prm } });
+    const e = edges(r);
+    chk(want.every(w => e.some(x => near(x, w))), id + ' boundaries ' + JSON.stringify(e) + ' want ' + want);
+    chk(Math.abs(r.finish - cfgA.T) < 1e-6, id + ' total');
+  }
+  // MP repeats: warm-up, cool-down, recovery and block count are exactly what was set
+  for (const [km, n, wu, cd, rest] of [[24.5, 3, 3, 2, 1], [24.5, 4, 3, 2, 1], [30, 5, 4, 3, 1.5], [21.0975, 2, 2, 1, 0.5]]) {
+    const r = E.plan('mpintervals', { ...base, km, T: km * 400, mp: 330, sp: { mpintervals: { n, wu, cd, rest, blkLen: 0 } } });
+    const z = roles(r);
+    const len = k => z.filter(q => q.role === k).reduce((a, q) => a + (q.end - q.start), 0) / 1000;
+    chk(near(len('wu'), wu, 0.01) && near(len('cd'), cd, 0.01), 'MP wu/cd honoured ' + [km, n, wu, cd]);
+    chk(z.filter(q => q.role === 'mp').length === n, 'MP block count ' + n);
+    chk(z.filter(q => q.role === 'rec').every(q => near(q.end - q.start, rest * 1000, 1)), 'MP recovery length');
+  }
+  // Fixed block length keeps warm-up and block length exactly; cool-down takes the rest and says so
+  const fx = E.plan('mpintervals', { ...base, km: 24.5, T: 24.5 * 400, mp: 330, sp: { mpintervals: { n: 3, wu: 3, cd: 2, rest: 1, blkLen: 5 } } });
+  const fz = roles(fx);
+  chk(near(fz[0].end - fz[0].start, 3000, 1) && fz.filter(q => q.role === 'mp').every(q => near(q.end - q.start, 5000, 1)), 'fixed length honoured');
+  chk(fx.notes.some(t => /cool-down takes the rest/.test(t)), 'fixed-length note');
+  // Race adjustments: first km / last km exactly 1000 m, even with 400 m splits
+  const ra = E.plan('even', { ...base, km: 10, T: 3000, splitM: 400, firstSlow: 20, kick: 15 });
+  const ea = edges(ra);
+  chk(ea.some(x => near(x, 1000)) && ea.some(x => near(x, 9000)), 'first/last km windows exact ' + ea);
+}
+console.log(bad ? 'FAILURES ' + bad : 'ALL OK (audit)');

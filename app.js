@@ -58,7 +58,7 @@
     ],
     mpintervals: [
       { k: 'n', label: 'Marathon-pace blocks', min: 1, max: 10, step: 1, fmt: function (v) { return v; } },
-      { k: 'blk', label: 'Block length', min: 0, max: 15, step: 0.5, fmt: function (v) { return +v === 0 ? 'auto (fills the run)' : v + ' km'; } },
+      { k: 'blkLen', label: 'Block length', min: 0, max: 15, step: 0.5, fmt: function (v) { return +v === 0 ? 'auto' : v + ' km, cool-down takes the rest'; } },
       { k: 'rest', label: 'Easy recovery', min: 0.5, max: 5, step: 0.5, fmt: function (v) { return v + ' km'; } },
       { k: 'wu', label: 'Warm-up', min: 0, max: 10, step: 0.5, fmt: function (v) { return v + ' km'; } },
       { k: 'cd', label: 'Cool-down', min: 0, max: 10, step: 0.5, fmt: function (v) { return v + ' km'; } },
