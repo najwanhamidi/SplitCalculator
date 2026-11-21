@@ -126,6 +126,28 @@
     <input id="incline" type="number" inputmode="decimal" min="0" max="15" step="0.5">
   </details>
 
+  <details class="panel" id="zoneOpts">
+    <summary>Heart rate and training zones</summary>
+    <label class="switch"><input type="checkbox" id="zonesOn"><span>Show the expected training zone and heart-rate range for every part of each plan</span></label>
+    <div class="grid2">
+      <label><span>Lactate threshold HR (bpm)</span>
+        <input id="lthr" type="number" inputmode="numeric" min="100" max="230" placeholder="e.g. 165"></label>
+      <label><span>Recent race</span>
+        <select id="raceM">
+          <option value="1609.34">1 mile</option><option value="3000">3K</option><option value="5000">5K</option><option value="10000">10K</option>
+          <option value="15000">15K</option><option value="21097.5">Half marathon</option><option value="42195">Marathon</option>
+        </select></label>
+    </div>
+    <span class="lbl">Race time</span>
+    <div class="time">
+      <label><input id="rh" type="number" inputmode="numeric" min="0" max="9" placeholder="0" aria-label="Race hours"><span>h</span></label>
+      <label><input id="rmin" type="number" inputmode="numeric" min="0" max="59" placeholder="0" aria-label="Race minutes"><span>min</span></label>
+      <label><input id="rsec" type="number" inputmode="numeric" min="0" max="59" placeholder="0" aria-label="Race seconds"><span>sec</span></label>
+    </div>
+    <div id="zoneInfo"></div>
+    <p class="hint">Your race sets your threshold pace (the pace you could race for about an hour). Zones follow Joe Friel's run zones: pace as a share of threshold pace, heart rate as a share of LTHR. Heart rate lags behind pace changes, drifts up on long runs and rises in heat, so treat the ranges as a guide.</p>
+  </details>
+
   <section class="panel" aria-labelledby="h-strat">
     <h2 id="h-strat">Strategies</h2>
     <div id="strats"></div>

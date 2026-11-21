@@ -37,3 +37,12 @@ All zones are set from your marathon pace. Edit the offsets (steady, float, sub-
 
 ## Develop
 No build step. Serve the folder (`python3 -m http.server`) and open `index.html`. The pure calculation code is in `engine.js`; `node test.js` runs its checks.
+
+
+## Split table views
+
+Rows per selected split, per km, per 5 km, or **Custom**: every N km, or every N minutes of running (time-based rows end exactly on the clock, e.g. 10:00, 20:00, … and the last row ends at the finish).
+
+## Heart rate and training zones
+
+Optional. Enter your lactate-threshold heart rate (LTHR) and a recent race (distance and time). The race gives your fitness (Daniels/Gilbert VDOT), equivalent race times and your threshold pace (the pace you could race for about an hour). Zones follow Joe Friel's run zones: pace as a share of threshold pace, heart rate as a share of LTHR (Z1 recovery, Z2 aerobic, Z3 tempo, Z4 sub-threshold, Z5a threshold, Z5b VO2max, Z5c anaerobic). When switched on, each plan shows time in each zone, the zone and HR range for every part of the pace plan and every table row, and adds them to the copied plan and to the QZ workout messages. A button can set your marathon pace from the race prediction.

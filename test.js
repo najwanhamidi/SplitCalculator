@@ -179,3 +179,38 @@ console.log(bad ? 'FAILURES ' + bad : 'ALL OK (audit)');
   const show2 = (id, km = 30, T = 11000) => { const r = E.plan(id, { ...base0, km, T }); const rs = E.runs(r, false); return id.padEnd(10) + ' base ' + E.fmtT(r.base) + ' | ' + rs.map(q => (q.role === 'easy' ? '' : q.role + ' ') + +(q.startM / 1000).toFixed(2) + '-' + +(q.endM / 1000).toFixed(2) + '@' + q.label).join(' ').slice(0, 330) + (r.notes.length > 1 ? ' !' + r.notes[0] : ''); };
   if (process.env.SHOW) E.LR_IDS.forEach(id => console.log(show2(id)));
 }
+
+/* ---- custom table rows and training zones ---- */
+{
+  let b3 = 0; const c3 = (c, m) => { if (!c) { b3++; if (b3 < 25) console.log('FAIL Z', m); } };
+  for (const id of ['even', 'negative', 'runwalk', 'pfitz', 'kenyan', 'mpintervals']) {
+    const r = E.plan(id, { ...base0, km: 21.0975, T: 7000, splitM: 1000 });
+    for (const sec of [60, 300, 600, 1234]) {
+      const w = E.windowsByTime(r, sec);
+      c3(Math.abs(w.reduce((a, x) => a + x.time, 0) - r.finish) < 1e-6, id + ' time rows sum ' + sec);
+      c3(Math.abs(w.at(-1).endM - r.totalM) < 1e-6 && Math.abs(w.at(-1).cum - r.finish) < 1e-6, id + ' time rows end');
+      c3(w.slice(0, -1).every((x, i) => Math.abs(x.cum - sec * (i + 1)) < 1e-6), id + ' time rows on the clock ' + sec);
+      c3(w.every((x, i) => i === 0 ? x.startM === 0 : Math.abs(x.startM - w[i - 1].endM) < 1e-9), id + ' time rows contiguous');
+    }
+    for (const L of [700, 2500, 3333]) {
+      const w = E.windows(r, L);
+      c3(Math.abs(w.reduce((a, x) => a + x.time, 0) - r.finish) < 1e-6, id + ' custom km rows ' + L);
+    }
+    c3(Math.abs(E.distAt(r, E.timeAt(r, 12345)) - 12345) < 1e-6, id + ' distAt inverse');
+  }
+  // VDOT close to Daniels' tables: 10K 50:00 → ~40, marathon equivalent ~3:49
+  const z = E.zoneModel({ raceM: 10000, raceSec: 3000, lthr: 165 });
+  c3(Math.abs(z.V - 40) < 0.3, 'vdot ' + z.V);
+  c3(Math.abs(z.preds[3].t - (3 * 3600 + 49 * 60 + 45)) < 120, 'marathon prediction ' + E.fmtT(z.preds[3].t));
+  c3(Math.abs(z.preds[1].t - 3000) < 1, 'own race predicted back');
+  c3(z.tp > 295 && z.tp < 310, 'threshold pace ' + z.tp);
+  c3(E.zoneOf(z.tp * 1.2, z) === 1 && E.zoneOf(z.tp * 1.03, z) === 3 && E.zoneOf(z.tp * 0.98, z) === 4 && E.zoneOf(z.tp * 1.5, z) === 0 && E.zoneOf(200, z) === 6, 'zone bands');
+  c3(E.zoneOf(200, z, true) === 0, 'walk is Z1');
+  c3(E.hrText(z, 1) === '140–147' && E.hrText(z, 0) === '<140' && /^>/.test(E.hrText(z, 6)), 'hr ranges ' + E.hrText(z, 1));
+  c3(E.zoneModel({ raceM: 10000, raceSec: 0 }) === null, 'needs a race');
+  const r = E.plan('pfitz', { ...base0, km: 30, T: 11000 });
+  const tz = E.timeInZones(r, z); c3(Math.abs(tz.reduce((a, b) => a + b, 0) - r.finish) < 1e-6, 'time in zones sums');
+  const tr = E.plan('pfitz', { ...base0, km: 30, T: 11000, treadmill: true });
+  c3(/ Z\d[abc]? HR /.test(E.qzWorkout(tr, { zones: z }).xml), 'xml zone tag');
+  console.log(b3 ? 'Z FAILURES ' + b3 : 'Z OK');
+}

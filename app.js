@@ -12,6 +12,8 @@
     view: {},    // per-card chart view: 'pace' | 'bank'
     tview: 'split', // table rows: 'split' | 'km' | '5k'
     incline: 0, mp: 330, zoneOff: Object.assign({}, E.ZONE_DEFAULTS),
+    tcust: { unit: 'km', v: 2 },   // custom table rows: every v km or every v min
+    zones: { on: false, lthr: 165, raceM: 10000, raceSec: 3000 },
     slots: {}    // strategy -> colour slot 1..8, kept while selected
   };
   var STRATS = E.STRATEGIES;
@@ -115,6 +117,14 @@
   var unit = function () { return tm() ? 'km/h' : '/km'; };
   var kmTxt = function (m) { return E.fmtKm(m); };
   function pv(pace) { return tm() ? (3600 / pace).toFixed(1) + ' km/h' : E.fmtT(pace) + ' /km'; }
+  /* Training zones from LTHR and a recent race (null when switched off or not enough input). */
+  function zm() { return st.zones.on ? E.zoneModel(st.zones) : null; }
+  function zBadge(z, i) { return '<span class="zb" data-z="' + i + '">' + E.HR_ZONES[i].z + '</span>'; }
+  function zText(z, lo, hi) {
+    if (hi === undefined) hi = lo;
+    var hr = E.hrText(z, lo, hi);
+    return zBadge(z, lo) + (hi !== lo ? '–' + zBadge(z, hi) : '') + (hr ? ' <span class="hr">' + hr + ' bpm</span>' : '');
+  }
   function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
 
   function targetSec() { return st.T; }
@@ -163,6 +173,9 @@
     });
     box.innerHTML = html;
     setMpFields(); setZoneFields();
+    $('zonesOn').checked = st.zones.on; $('lthr').value = st.zones.lthr || ''; $('raceM').value = String(st.zones.raceM);
+    var rs = Math.round(st.zones.raceSec || 0);
+    $('rh').value = Math.floor(rs / 3600) || ''; $('rmin').value = Math.floor((rs % 3600) / 60) || ''; $('rsec').value = rs % 60 || '';
     syncUi();
   }
   /* Show the goal in all three forms. The goal time st.T stays the source of truth. */
@@ -202,7 +215,22 @@
       var off = st.zoneOff[k] != null ? st.zoneOff[k] : E.ZONE_DEFAULTS[k], pc = st.mp + off;
       $('zoo-' + k).textContent = pc > 0 ? (tm() ? (3600 / pc).toFixed(1) + ' km/h' : E.fmtT(pc) + ' /km') : '';
     });
+    zoneInfo();
     $('firstOut').textContent = st.firstSlow; $('kickOut').textContent = st.kick;
+  }
+  function zoneInfo() {
+    var box = $('zoneInfo'), z = E.zoneModel(st.zones);
+    if (!z) { box.innerHTML = '<p class="warn">Enter a recent race time to work out your zones.</p>'; return; }
+    var sp = function (p) { return tm() ? (3600 / p).toFixed(1) : E.fmtT(p); };
+    var rows = z.rows.map(function (r) {
+      var rng = r.i === 0 ? 'slower than ' + sp(r.fast) : (r.i === z.rows.length - 1 ? 'faster than ' + sp(r.slow) : (tm() ? sp(r.slow) + '–' + sp(r.fast) : sp(r.fast) + '–' + sp(r.slow)));
+      return '<tr><td>' + zBadge(z, r.i) + '</td><td class="zn">' + r.name + '</td><td>' + rng + '</td><td>' + (z.lthr ? E.hrText(z, r.i) : '–') + '</td></tr>';
+    }).join('');
+    var mp = z.preds[3].t / 42.195;
+    box.innerHTML = '<p class="hint">Fitness (VDOT) <b>' + z.V.toFixed(1) + '</b> · threshold pace <b>' + pv(z.tp) + '</b>' + (z.lthr ? ' at about <b>' + z.lthr + ' bpm</b>' : '') + '.<br>Equivalent races: ' +
+      z.preds.map(function (p) { return p.label + ' ' + E.fmtT(p.t); }).join(' · ') + '</p>' +
+      '<div class="tablewrap"><table class="ztab"><thead><tr><th>Zone</th><th class="zn">Name</th><th>' + (tm() ? 'km/h' : 'Pace /km') + '</th><th>HR bpm</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
+      '<div class="actions"><button type="button" class="btn" id="useMp" data-mp="' + mp.toFixed(2) + '">Use ' + pv(mp) + ' as my marathon pace</button></div>';
   }
   function num(id, def) { var v = parseFloat($(id).value); return isFinite(v) ? v : def; }
   function readInputs() {
@@ -212,6 +240,7 @@
     st.paceStep = +$('paceStep').value; st.speedStep = +$('speedStep').value; st.group = +$('group').value;
     st.firstSlow = +$('firstSlow').value; st.kick = +$('kick').value;
     st.incline = Math.min(15, Math.max(0, num('incline', 0)));
+    st.zones = { on: $('zonesOn').checked, lthr: num('lthr', 0), raceM: +$('raceM').value, raceSec: num('rh', 0) * 3600 + num('rmin', 0) * 60 + num('rsec', 0) };
   }
 
   /* ---------- rendering ---------- */
@@ -274,7 +303,14 @@
     var v = [{ k: 'split', label: 'Per split (' + splitName() + ')', len: st.splitM }];
     if (Math.abs(st.splitM - 1000) > 0.01 && r.totalM > 1000) v.push({ k: 'km', label: 'Per km', len: 1000 });
     if (Math.abs(st.splitM - 5000) > 0.01 && r.totalM > 10000) v.push({ k: '5k', label: 'Per 5 km', len: 5000 });
+    var c = st.tcust || { unit: 'km', v: 2 };
+    v.push({ k: 'custom', btn: 'Custom', label: 'Every ' + c.v + (c.unit === 'min' ? ' min' : ' km'), len: c.v * 1000, sec: c.unit === 'min' ? c.v * 60 : 0 });
     return v;
+  }
+  /* Rows for the chosen table view. Custom rows cut by distance or by running time; very short cuts are stretched so a table stays under 600 rows. */
+  function tableRows(r, cur) {
+    if (cur.sec) return E.windowsByTime(r, Math.max(cur.sec, r.finish / 600));
+    return E.windows(r, Math.max(cur.len, r.totalM / 600));
   }
   function currentView(tv) { return tv.filter(function (v) { return v.k === st.tview; })[0] || tv[0]; }
 
@@ -285,7 +321,7 @@
     return E.plan(id, c);
   }
   function exportHtml(id) {
-    var q = E.qzWorkout(exportPlan(id), { incline: st.incline });
+    var q = E.qzWorkout(exportPlan(id), { incline: st.incline, zones: zm() });
     return '<details class="tune export" data-exp="' + id + '"' + (ui.expOpen[id] ? ' open' : '') + '><summary>Export to QZ workout (.xml)</summary>' +
       '<p class="hint">For qdomyos-zwift treadmill workouts: ' + q.rows.length + ' intervals, ' + E.fmtT(q.total) + ' total' +
       (tm() ? '.' : '. Speeds snap to 0.1 km/h, and time is kept on target, so a few intervals may differ slightly from the outdoor paces shown.') + '</p>' +
@@ -297,7 +333,7 @@
     return (nameOf(id) + '_' + (Math.round(st.km * 100) / 100) + 'km_' + T).replace(/[^A-Za-z0-9_.-]+/g, '_') + '.xml';
   }
   function download(id) {
-    var q = E.qzWorkout(exportPlan(id), { incline: st.incline });
+    var q = E.qzWorkout(exportPlan(id), { incline: st.incline, zones: zm() });
     var blob = new Blob([q.xml], { type: 'application/xml' });
     var a = document.createElement('a');
     a.href = URL.createObjectURL(blob); a.download = fileName(id);
@@ -312,8 +348,9 @@
     var hd = r.half2 - r.half1;
     var halfNote = Math.abs(hd) < 0.5 ? 'even halves' : (hd < 0 ? 'negative by ' : 'positive by ') + E.fmtT(Math.abs(hd));
 
+    var zr = zm(), z = zr;
     var runs = E.runs(r, tm()).map(function (x) {
-      return '<li' + (x.walk ? ' class="walk"' : (E.ZONE_TAG[x.role] ? ' class="mpr"' : '')) + '>' + kmTxt(x.startM) + '–' + kmTxt(x.endM) + ' km · ' + (x.walk ? 'walk ' : '') + (E.ZONE_TAG[x.role] ? E.ZONE_TAG[x.role] + ' ' : '') + '<b>' + x.label + '</b> ' + unit() + (tm() && x.incline != null ? ' @ ' + x.incline + '% incline' : '') + ' · until ' + E.fmtT(x.endT) + '</li>';
+      return '<li' + (x.walk ? ' class="walk"' : (E.ZONE_TAG[x.role] ? ' class="mpr"' : '')) + '>' + kmTxt(x.startM) + '–' + kmTxt(x.endM) + ' km · ' + (x.walk ? 'walk ' : '') + (E.ZONE_TAG[x.role] ? E.ZONE_TAG[x.role] + ' ' : '') + '<b>' + x.label + '</b> ' + unit() + (tm() && x.incline != null ? ' @ ' + x.incline + '% incline' : '') + ' · until ' + E.fmtT(x.endT) + (zr ? ' · ' + zText(zr, E.zoneOf((x.endT - x.startT) / ((x.endM - x.startM) / 1000), zr, x.walk)) : '') + '</li>';
     }).join('');
     var cps = E.checkpoints(r);
     var cpHtml = cps.length ? '<div class="cp"><h4>Checkpoints</h4><ul class="plan">' + cps.map(function (c) {
@@ -325,8 +362,14 @@
     var head = tm()
       ? '<th>To km</th><th>km/h</th><th>Pace</th><th>Time</th><th>Elapsed</th><th>Vs even</th>'
       : '<th>To km</th><th>Pace</th><th>km/h</th><th>Time</th><th>Elapsed</th><th>Vs even</th>';
+    if (z) head = head.replace('<th>Time</th>', '<th>Zone</th>' + (z.lthr ? '<th>HR bpm</th>' : '') + '<th>Time</th>');
     var prev = null, anyMixed = false;
-    var tr = E.windows(r, cur.len);
+    var tr = tableRows(r, cur);
+    var zCells = function (g) {
+      if (!z) return '';
+      var sp = E.zoneSpan(r, g.startM, g.endM, z);
+      return '<td class="zc">' + zBadge(z, sp[0]) + (sp[1] !== sp[0] ? '–' + zBadge(z, sp[1]) : '') + '</td>' + (z.lthr ? '<td>' + E.hrText(z, sp[0], sp[1]) + '</td>' : '');
+    };
     var rows = tr.map(function (g) {
       var key = tm() ? g.speed.toFixed(1) : E.fmtT(g.pace);
       var chg = prev !== null && key !== prev; prev = key;
@@ -335,11 +378,13 @@
       var cells = tm()
         ? '<td class="pv">' + g.speed.toFixed(1) + avg + '</td><td>' + E.fmtT(g.pace) + '</td>'
         : '<td class="pv">' + E.fmtT(g.pace) + avg + '</td><td>' + g.speed.toFixed(1) + '</td>';
-      return '<tr' + (chg ? ' class="chg"' : '') + '><td>' + kmTxt(g.endM) + (g.walk ? ' <small>walk</small>' : '') + '</td>' + cells + '<td>' + E.fmtT(g.time) + '</td><td>' + E.fmtT(g.cum) + '</td><td>' + E.fmtSigned(g.bank) + '</td></tr>';
+      return '<tr' + (chg ? ' class="chg"' : '') + '><td>' + kmTxt(g.endM) + (g.walk ? ' <small>walk</small>' : '') + '</td>' + cells + zCells(g) + '<td>' + E.fmtT(g.time) + '</td><td>' + E.fmtT(g.cum) + '</td><td>' + E.fmtSigned(g.bank) + '</td></tr>';
     }).join('');
     var tvSeg = tv.length > 1 ? '<div class="seg sm" role="radiogroup" aria-label="Table rows">' + tv.map(function (v) {
-      return '<button type="button" role="radio" data-tview="' + v.k + '" aria-checked="' + (v.k === cur.k) + '">' + v.label + '</button>';
+      return '<button type="button" role="radio" data-tview="' + v.k + '" aria-checked="' + (v.k === cur.k) + '">' + (v.btn || v.label) + '</button>';
     }).join('') + '</div>' : '';
+    if (cur.k === 'custom') tvSeg += '<div class="tcust"><label>Row every <input type="text" inputmode="decimal" data-tcust="v" data-card="' + id + '" value="' + esc(ui.tcustText || String(st.tcust.v)) + '" aria-label="Custom row length"></label>' +
+      '<select data-tcust="unit" data-card="' + id + '" aria-label="Custom row unit"><option value="km"' + (st.tcust.unit === 'km' ? ' selected' : '') + '>km</option><option value="min"' + (st.tcust.unit === 'min' ? ' selected' : '') + '>min</option></select></div>';
 
     var notes = (r.notes || []).map(function (w) { return '<p class="note">' + esc(w) + '</p>'; }).join('');
     var warn = notes + (r.warn || []).map(function (w) { return '<p class="warn" role="note">' + esc(w) + '</p>'; }).join('');
@@ -348,6 +393,7 @@
       stat('Finish', E.fmtT(r.finish)) + stat('Vs goal', delta) + stat('Average', pv(r.avgPace)) +
       stat('Fastest', pv(r.fastest)) + stat('Slowest', pv(r.slowest)) + easy +
       stat('Halves', E.fmtT(r.half1) + ' / ' + E.fmtT(r.half2) + '<small>' + halfNote + '</small>') + '</dl>' +
+      tizHtml(r, zr) +
       '<h4 class="plan-h">Pace plan</h4><ul class="plan" aria-label="Pace plan">' + runs + '</ul>' + cpHtml +
       '<div class="seg sm" role="radiogroup" aria-label="Chart view">' +
       '<button type="button" role="radio" data-view="pace" data-card="' + id + '" aria-checked="' + (view === 'pace') + '">' + (tm() ? 'Speed' : 'Pace') + '</button>' +
@@ -361,6 +407,15 @@
       '<div class="actions"><button type="button" class="btn" data-copy="' + id + '">Copy plan</button></div>';
   }
 
+  function tizHtml(r, z) {
+    if (!z) return '';
+    var t = E.timeInZones(r, z), tot = t.reduce(function (a, b) { return a + b; }, 0) || 1;
+    var bar = t.map(function (v, i) { return v > 0 ? '<i data-z="' + i + '" style="width:' + (v / tot * 100).toFixed(2) + '%" title="' + E.HR_ZONES[i].z + ' ' + E.fmtT(v) + '"></i>' : ''; }).join('');
+    var leg = t.map(function (v, i) {
+      return v > 0.5 ? '<li>' + zBadge(z, i) + ' ' + E.HR_ZONES[i].name + ' <b>' + E.fmtT(v) + '</b> <small>' + Math.round(v / tot * 100) + '%</small></li>' : '';
+    }).join('');
+    return '<h4 class="plan-h">Time in zones</h4><div class="tizbar" aria-hidden="true">' + bar + '</div><ul class="plan tiz">' + leg + '</ul>';
+  }
   function compareInner(plans) {
     var rs = plans.map(function (p) { return p.r; });
     var sc = scale(rs, true);
@@ -505,19 +560,34 @@
     var v = tm() ? g.speed.toFixed(1) + ' km/h (' + E.fmtT(g.pace) + ' /km)' : E.fmtT(g.pace) + ' /km (' + g.speed.toFixed(1) + ' km/h)';
     var bank = Math.round(g.bank);
     var bt = bank === 0 ? 'level with even pace' : E.fmtT(Math.abs(bank)) + (bank < 0 ? ' ahead of even' : ' behind even');
-    $('ro-' + id).textContent = kmTxt(g.startM) + '–' + kmTxt(g.endM) + ' km: ' + (g.walk ? 'walk ' : '') + v + ', split ' + E.fmtT(g.time) + ', elapsed ' + E.fmtT(g.cum) + ', ' + bt;
+    $('ro-' + id).textContent = kmTxt(g.startM) + '–' + kmTxt(g.endM) + ' km: ' + (g.walk ? 'walk ' : '') + v + ', split ' + E.fmtT(g.time) + ', elapsed ' + E.fmtT(g.cum) + ', ' + bt + zHover(g);
+  }
+  function zHover(g) {
+    var z = zm(); if (!z) return '';
+    var i = E.zoneOf(g.pace, z, g.walk), hr = E.hrText(z, i);
+    return ', ' + E.HR_ZONES[i].z + ' ' + E.HR_ZONES[i].name.toLowerCase() + (hr ? ', HR ' + hr + ' bpm' : '');
+  }
+  function zPlain(z, lo, hi) {
+    if (hi === undefined) hi = lo;
+    var hr = E.hrText(z, lo, hi);
+    return E.HR_ZONES[lo].z + (hi !== lo ? '–' + E.HR_ZONES[hi].z : '') + (hr ? ' HR ' + hr : '');
   }
   function copyText(id) {
     var r = last[id] || E.plan(id, cfg());
     var lines = [nameOf(id) + ' · ' + st.km + ' km · ' + (tm() ? 'treadmill' : 'outdoor') + ' · finish ' + E.fmtT(r.finish)];
-    E.runs(r, tm()).forEach(function (x) { lines.push(kmTxt(x.startM) + '–' + kmTxt(x.endM) + ' km: ' + (x.walk ? 'walk ' : '') + x.label + ' ' + unit() + ' (until ' + E.fmtT(x.endT) + ')'); });
+    var z = zm();
+    E.runs(r, tm()).forEach(function (x) {
+      var zz = z ? '  ' + zPlain(z, E.zoneOf((x.endT - x.startT) / ((x.endM - x.startM) / 1000), z, x.walk)) : '';
+      lines.push(kmTxt(x.startM) + '–' + kmTxt(x.endM) + ' km: ' + (x.walk ? 'walk ' : '') + x.label + ' ' + unit() + ' (until ' + E.fmtT(x.endT) + ')' + zz);
+    });
     var cps = E.checkpoints(r);
     if (cps.length) lines.push('Checkpoints: ' + cps.map(function (c) { return c.label + ' ' + E.fmtT(c.t); }).join(', '));
     lines.push('');
     var cur = currentView(tableViews(r));
     lines.push(cur.label + ':');
-    E.windows(r, cur.len).forEach(function (g) {
-      lines.push(kmTxt(g.endM) + ' km  ' + (tm() ? g.speed.toFixed(1) + ' km/h  ' : '') + E.fmtT(g.pace) + '/km' + (g.mixed ? ' (avg)' : '') + '  time ' + E.fmtT(g.time) + '  total ' + E.fmtT(g.cum));
+    tableRows(r, cur).forEach(function (g) {
+      var zs = z ? E.zoneSpan(r, g.startM, g.endM, z) : null;
+      lines.push(kmTxt(g.endM) + ' km  ' + (tm() ? g.speed.toFixed(1) + ' km/h  ' : '') + E.fmtT(g.pace) + '/km' + (g.mixed ? ' (avg)' : '') + '  time ' + E.fmtT(g.time) + '  total ' + E.fmtT(g.cum) + (zs ? '  ' + zPlain(z, zs[0], zs[1]) : ''));
     });
     return lines.join('\n');
   }
@@ -536,6 +606,20 @@
       var out = t.closest('.tune').querySelector('[data-out="' + k + '"]');
       if (out) out.textContent = def.fmt(+t.value);
       save(); updateCard(id);
+      return;
+    }
+    if (t.dataset && t.dataset.tcust) {
+      var card = t.dataset.card;
+      if (t.dataset.tcust === 'unit') { st.tcust.unit = t.value === 'min' ? 'min' : 'km'; ui.tcustText = ''; }
+      else {
+        var cv = parseFloat(String(t.value).replace(',', '.'));
+        ui.tcustText = t.value;
+        if (!(cv > 0)) return;
+        st.tcust.v = cv;
+      }
+      render();
+      var again = document.querySelector('[data-tcust="' + t.dataset.tcust + '"][data-card="' + card + '"]');
+      if (again) { again.focus(); if (again.setSelectionRange) { var L = again.value.length; again.setSelectionRange(L, L); } }
       return;
     }
     if (t.id && t.id.indexOf('zo-') === 0) {
@@ -579,10 +663,11 @@
     else if (b.dataset.goal) { st.goal = b.dataset.goal; setGoalFields(st.T); render(); }
     else if (b.dataset.mode) { st.mode = b.dataset.mode; render(); }
     else if (b.dataset.dl) { download(b.dataset.dl); }
-    else if (b.dataset.copyxml) { copy(b, E.qzWorkout(exportPlan(b.dataset.copyxml), { incline: st.incline }).xml, 'Copy XML'); }
+    else if (b.dataset.copyxml) { copy(b, E.qzWorkout(exportPlan(b.dataset.copyxml), { incline: st.incline, zones: zm() }).xml, 'Copy XML'); }
     else if (b.dataset.tview) { st.tview = b.dataset.tview; render(); }
     else if (b.dataset.view) { st.view[b.dataset.card] = b.dataset.view; save(); updateCard(b.dataset.card); }
     else if (b.dataset.resetstrat) { delete st.sp[b.dataset.resetstrat]; ui.tuneOpen[b.dataset.resetstrat] = true; render(); }
+    else if (b.id === 'useMp') { st.mp = Math.round(+b.dataset.mp); setMpFields(); render(); }
     else if (b.id === 'zoreset') { st.zoneOff = Object.assign({}, E.ZONE_DEFAULTS); setZoneFields(); render(); }
     else if (b.closest('#strats')) {
       var i = st.sel.indexOf(b.dataset.id);

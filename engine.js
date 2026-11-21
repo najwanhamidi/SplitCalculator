@@ -598,24 +598,116 @@
     return res.finish;
   }
 
-  /* Table rows for any window length (selected split, 1 km, 5 km): time, average pace, elapsed, vs even. */
+  /* Distance covered at time t (inverse of timeAt). */
+  function distAt(res, t) {
+    for (let i = 0; i < res.segs.length; i++) {
+      const s = res.segs[i];
+      if (t <= s.cum + 1e-9) return s.startM + (t - s.startT) / s.pace * 1000;
+    }
+    return res.totalM;
+  }
+  function windowRow(res, a, b) {
+    const t0 = timeAt(res, a), t1 = timeAt(res, b), t = t1 - t0;
+    const inside = res.segs.filter(function (s) { return s.endM > a + 1e-6 && s.startM < b - 1e-6; });
+    const kinds = {};
+    inside.forEach(function (s) { kinds[s.pace.toFixed(4)] = 1; });
+    return {
+      startM: a, endM: b, d: b - a, time: t, cum: t1, startT: t0,
+      pace: t / ((b - a) / 1000), speed: (b - a) / 1000 / t * 3600,
+      mixed: Object.keys(kinds).length > 1,
+      walk: inside.some(function (s) { return s.walk; }),
+      bank: t1 - res.T * b / res.totalM
+    };
+  }
+  /* Table rows for any window length (selected split, 1 km, 5 km, custom): time, average pace, elapsed, vs even. */
   function windows(res, lenM) {
     const rows = [];
-    for (let a = 0; a < res.totalM - 0.5; a += lenM) {
-      const b = Math.min(a + lenM, res.totalM);
-      const t0 = timeAt(res, a), t1 = timeAt(res, b), t = t1 - t0;
-      const inside = res.segs.filter(function (s) { return s.endM > a + 1e-6 && s.startM < b - 1e-6; });
-      const kinds = {};
-      inside.forEach(function (s) { kinds[s.pace.toFixed(4)] = 1; });
-      rows.push({
-        startM: a, endM: b, d: b - a, time: t, cum: t1,
-        pace: t / ((b - a) / 1000), speed: (b - a) / 1000 / t * 3600,
-        mixed: Object.keys(kinds).length > 1,
-        walk: inside.some(function (s) { return s.walk; }),
-        bank: t1 - res.T * b / res.totalM
-      });
+    lenM = Math.max(10, lenM);
+    for (let a = 0; a < res.totalM - 0.5; a += lenM) rows.push(windowRow(res, a, Math.min(a + lenM, res.totalM)));
+    return rows;
+  }
+  /* Table rows by running time: one row every `sec` seconds, the last row ends at the finish. */
+  function windowsByTime(res, sec) {
+    const rows = [];
+    sec = Math.max(10, sec);
+    let a = 0;
+    for (let t = sec; ; t += sec) {
+      const end = t >= res.finish - 0.5;
+      const b = end ? res.totalM : distAt(res, t);
+      if (b > a + 1e-6) rows.push(windowRow(res, a, b));
+      a = b;
+      if (end) break;
     }
     return rows;
+  }
+
+  /* ===== Training zones =====
+     Fitness from a recent race uses the Daniels/Gilbert VDOT formulas. Threshold pace is the pace
+     you could race for 60 minutes. Zones follow Joe Friel's run zones: pace as a % of threshold
+     pace, heart rate as a % of lactate-threshold heart rate (LTHR). */
+  const vo2At = function (v) { return -4.6 + 0.182258 * v + 0.000104 * v * v; };          // v in m/min
+  const pctMax = function (min) { return 0.8 + 0.1894393 * Math.exp(-0.012778 * min) + 0.2989558 * Math.exp(-0.1932605 * min); };
+  const velFor = function (vo) { const a = 0.000104, b = 0.182258, c = -4.6 - vo; return (-b + Math.sqrt(b * b - 4 * a * c)) / (2 * a); };
+  function vdot(m, sec) { const t = sec / 60; return vo2At(m / t) / pctMax(t); }
+  function predictTime(m, V) {
+    let lo = m / 1000 * 100, hi = m / 1000 * 1500;
+    for (let i = 0; i < 80; i++) { const mid = (lo + hi) / 2; if (vdot(m, mid) > V) lo = mid; else hi = mid; }
+    return (lo + hi) / 2;
+  }
+  const HR_ZONES = [
+    { z: 'Z1', name: 'Recovery', lo: 1.29, hi: Infinity, hr: [0, 0.84] },
+    { z: 'Z2', name: 'Aerobic (easy)', lo: 1.14, hi: 1.29, hr: [0.85, 0.89] },
+    { z: 'Z3', name: 'Tempo', lo: 1.06, hi: 1.14, hr: [0.90, 0.94] },
+    { z: 'Z4', name: 'Sub-threshold', lo: 1.00, hi: 1.06, hr: [0.95, 0.99] },
+    { z: 'Z5a', name: 'Threshold', lo: 0.97, hi: 1.00, hr: [1.00, 1.02] },
+    { z: 'Z5b', name: 'VO2max', lo: 0.90, hi: 0.97, hr: [1.03, 1.06] },
+    { z: 'Z5c', name: 'Anaerobic', lo: 0, hi: 0.90, hr: [1.065, Infinity] }
+  ];
+  /* cfg: { raceM, raceSec, lthr } → { V, tp (s/km), lthr, rows[], preds[] } or null */
+  function zoneModel(cfg) {
+    if (!(cfg && cfg.raceM > 0 && cfg.raceSec > 0)) return null;
+    const pace = cfg.raceSec / (cfg.raceM / 1000);
+    if (pace < 100 || pace > 1500) return null;
+    const V = vdot(cfg.raceM, cfg.raceSec);
+    if (!(V > 10 && V < 95)) return null;
+    const tp = 60000 / velFor(V * pctMax(60));
+    const L = cfg.lthr > 0 ? cfg.lthr : 0;
+    const rows = HR_ZONES.map(function (z, i) {
+      return {
+        i: i, z: z.z, name: z.name, slow: z.hi === Infinity ? Infinity : tp * z.hi, fast: tp * z.lo,
+        hrLo: L ? (i === 0 ? 0 : Math.round(z.hr[0] * L)) : 0,
+        hrHi: L ? (z.hr[1] === Infinity ? Infinity : Math.round(z.hr[1] * L)) : 0
+      };
+    });
+    const preds = [[5000, '5K'], [10000, '10K'], [21097.5, 'Half'], [42195, 'Marathon']].map(function (d) { return { label: d[1], M: d[0], t: predictTime(d[0], V) }; });
+    return { V: V, tp: tp, lthr: L, rows: rows, preds: preds };
+  }
+  function zoneOf(pace, zm, walk) {
+    if (walk) return 0;
+    const r = pace / zm.tp;
+    for (let i = 0; i < HR_ZONES.length; i++) if (r >= HR_ZONES[i].lo) return i;
+    return HR_ZONES.length - 1;
+  }
+  /* Lowest and highest zone touched between two distances. */
+  function zoneSpan(res, a, b, zm) {
+    let lo = 99, hi = -1;
+    res.segs.forEach(function (s) {
+      if (s.endM > a + 1e-6 && s.startM < b - 1e-6) { const z = zoneOf(s.pace, zm, s.walk); lo = Math.min(lo, z); hi = Math.max(hi, z); }
+    });
+    return hi < 0 ? [0, 0] : [lo, hi];
+  }
+  function timeInZones(res, zm) {
+    const t = HR_ZONES.map(function () { return 0; });
+    res.segs.forEach(function (s) { t[zoneOf(s.pace, zm, s.walk)] += s.time; });
+    return t;
+  }
+  function hrText(zm, lo, hi) {
+    if (!zm.lthr) return '';
+    const a = zm.rows[lo], b = zm.rows[hi === undefined ? lo : hi];
+    if (a.hrLo === 0 && b.hrHi === Infinity) return 'any';
+    if (a.hrLo === 0) return '<' + (b.hrHi + 1);
+    if (b.hrHi === Infinity) return '>' + (a.hrLo - 1);
+    return a.hrLo + '–' + b.hrHi;
   }
 
   /* Time at every 5 km plus the half-marathon mark, for distances that pass them. */
@@ -667,7 +759,8 @@
     const rows = runs(res, true).map(function (x, i) {
       const speed = +x.label;
       const dur = Math.round(x.endT) - Math.round(x.startT);
-      const msg = 'Interval ' + (i + 1) + (x.walk ? ' walk' : '') + (ZONE_TAG[x.role] ? ' ' + ZONE_TAG[x.role] : '') + ' (' + fmtKm(x.startM) + '-' + fmtKm(x.endM) + ' km)';
+      let msg = 'Interval ' + (i + 1) + (x.walk ? ' walk' : '') + (ZONE_TAG[x.role] ? ' ' + ZONE_TAG[x.role] : '') + ' (' + fmtKm(x.startM) + '-' + fmtKm(x.endM) + ' km)';
+      if (opts.zones) { const zi = zoneOf(3600 / speed, opts.zones, x.walk); msg += ' ' + HR_ZONES[zi].z + (opts.zones.lthr ? ' HR ' + hrText(opts.zones, zi) : ''); }
       return { dur: dur, speed: speed, msg: msg, incline: x.incline != null ? x.incline : incline };
     }).filter(function (r) { return r.dur > 0; });
     let xml = '<?xml version="1.0" encoding="UTF-8"?>\n<rows device="treadmill">\n';
@@ -682,7 +775,8 @@
   const api = { qzWorkout: qzWorkout,
     STRATEGIES: STRATEGIES, MP_IDS: MP_IDS, LR_IDS: LR_IDS, LR_UI: LR_UI, ZONE_DEFAULTS: ZONE_DEFAULTS, ZONE_LABELS: ZONE_LABELS, ZONE_TAG: ZONE_TAG,
     isMpLike: function (id) { return MP_IDS.indexOf(id) >= 0 || !!LR[id]; }, PARAM_DEFAULTS: PARAM_DEFAULTS, params: params, plan: plan, timeAt: timeAt,
-    checkpoints: checkpoints, windows: windows, fmtT: fmtT, fmtSigned: fmtSigned, fmtKm: fmtKm, runs: runs, buildSegments: buildSegments
+    checkpoints: checkpoints, windows: windows, windowsByTime: windowsByTime, distAt: distAt,
+    HR_ZONES: HR_ZONES, vdot: vdot, predictTime: predictTime, zoneModel: zoneModel, zoneOf: zoneOf, zoneSpan: zoneSpan, timeInZones: timeInZones, hrText: hrText, fmtT: fmtT, fmtSigned: fmtSigned, fmtKm: fmtKm, runs: runs, buildSegments: buildSegments
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.SplitEngine = api;
