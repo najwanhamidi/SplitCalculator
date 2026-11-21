@@ -199,18 +199,39 @@ console.log(bad ? 'FAILURES ' + bad : 'ALL OK (audit)');
     c3(Math.abs(E.distAt(r, E.timeAt(r, 12345)) - 12345) < 1e-6, id + ' distAt inverse');
   }
   // VDOT close to Daniels' tables: 10K 50:00 → ~40, marathon equivalent ~3:49
-  const z = E.zoneModel({ raceM: 10000, raceSec: 3000, lthr: 165 });
+  const z = E.zoneModel({ raceM: 10000, raceSec: 3000, lthr: 165, pm: 'vdot', hm: 'frielRun' });
   c3(Math.abs(z.V - 40) < 0.3, 'vdot ' + z.V);
   c3(Math.abs(z.preds[3].t - (3 * 3600 + 49 * 60 + 45)) < 120, 'marathon prediction ' + E.fmtT(z.preds[3].t));
   c3(Math.abs(z.preds[1].t - 3000) < 1, 'own race predicted back');
   c3(z.tp > 295 && z.tp < 310, 'threshold pace ' + z.tp);
-  c3(E.zoneOf(z.tp * 1.2, z) === 1 && E.zoneOf(z.tp * 1.03, z) === 3 && E.zoneOf(z.tp * 0.98, z) === 4 && E.zoneOf(z.tp * 1.5, z) === 0 && E.zoneOf(200, z) === 6, 'zone bands');
-  c3(E.zoneOf(200, z, true) === 0, 'walk is Z1');
-  c3(E.hrText(z, 1) === '140–147' && E.hrText(z, 0) === '<140' && /^>/.test(E.hrText(z, 6)), 'hr ranges ' + E.hrText(z, 1));
-  c3(E.zoneModel({ raceM: 10000, raceSec: 0 }) === null, 'needs a race');
+  // predictors give the race back and Riegel is exact
+  for (const k of ['vdot', 'riegel', 'cameron']) c3(Math.abs(E.PRED[k](10000, 3000, 10000) - 3000) < 1, k + ' identity');
+  c3(Math.abs(E.PRED.riegel(10000, 3000, 21097.5) - 3000 * Math.pow(2.10975, 1.06)) < 1e-6, 'riegel');
+  // Friel running HR ranges at LTHR 165 match the published table
+  c3(E.hrText(z, 0) === '<140' && E.hrText(z, 1) === '140–147' && E.hrText(z, 4) === '165–168' && E.hrText(z, 6) === '>175', 'friel ' + [0, 1, 4, 6].map(i => E.hrText(z, i)));
+  // every pace × HR model: zones ordered, contiguous classification, monotone in pace, sums of time
   const r = E.plan('pfitz', { ...base0, km: 30, T: 11000 });
-  const tz = E.timeInZones(r, z); c3(Math.abs(tz.reduce((a, b) => a + b, 0) - r.finish) < 1e-6, 'time in zones sums');
+  for (const pm of E.PACE_MODEL_IDS) for (const hm of E.HR_MODEL_IDS) {
+    const m = E.zoneModel({ raceM: 21097.5, raceSec: 6300, lthr: 170, pm, hm });
+    c3(m && m.pm.zones.length >= 5 && m.pm.cuts.every((c, i) => i === 0 || c < m.pm.cuts[i - 1]), pm + ' cuts descending');
+    let lastP = -1, lastH = -1;
+    for (let pace = 600; pace >= 170; pace -= 2) {
+      const p = E.paceZoneOf(pace, m), h = E.hrZoneOf(pace, m);
+      c3(p >= lastP && h >= lastH, pm + '/' + hm + ' monotone at ' + pace); lastP = p; lastH = h;
+    }
+    c3(E.paceZoneOf(900, m) === 0 && E.hrZoneOf(900, m) === 0, pm + '/' + hm + ' slow is zone 1');
+    const t = E.timeInZones(r, m);
+    c3(Math.abs(t.p.reduce((a, b) => a + b, 0) - r.finish) < 1e-6 && Math.abs(t.h.reduce((a, b) => a + b, 0) - r.finish) < 1e-6, 'tiz sums ' + pm + hm);
+    // HR text never overlaps between neighbouring zones
+    const bpm = m.hm.zones.map((q, i) => E.hrText(m, i));
+    c3(bpm.every(x => x && x !== 'any'), hm + ' bpm text');
+  }
+  // expected HR at threshold pace is LTHR; marathon pace lands near 92–96% LTHR
+  c3(E.hrExpected(z.tp, z) === 165, 'hr at threshold ' + E.hrExpected(z.tp, z));
+  const mpPct = E.hrPct(z.preds[3].t / 42.195, z); c3(mpPct > 0.90 && mpPct < 0.97, 'MP heart rate ' + mpPct);
+  c3(E.paceZoneOf(200, z, true) === 0 && E.hrZoneOf(200, z, true) === 0, 'walk is zone 1');
+  c3(E.zoneModel({ raceM: 10000, raceSec: 0 }) === null, 'needs a race');
   const tr = E.plan('pfitz', { ...base0, km: 30, T: 11000, treadmill: true });
-  c3(/ Z\d[abc]? HR /.test(E.qzWorkout(tr, { zones: z }).xml), 'xml zone tag');
+  c3(/ M Z\d[abc]? HR \d/.test(E.qzWorkout(tr, { zones: z }).xml), 'xml zone tag');
   console.log(b3 ? 'Z FAILURES ' + b3 : 'Z OK');
 }

@@ -45,4 +45,16 @@ Rows per selected split, per km, per 5 km, or **Custom**: every N km, or every N
 
 ## Heart rate and training zones
 
-Optional. Enter your lactate-threshold heart rate (LTHR) and a recent race (distance and time). The race gives your fitness (Daniels/Gilbert VDOT), equivalent race times and your threshold pace (the pace you could race for about an hour). Zones follow Joe Friel's run zones: pace as a share of threshold pace, heart rate as a share of LTHR (Z1 recovery, Z2 aerobic, Z3 tempo, Z4 sub-threshold, Z5a threshold, Z5b VO2max, Z5c anaerobic). When switched on, each plan shows time in each zone, the zone and HR range for every part of the pace plan and every table row, and adds them to the copied plan and to the QZ workout messages. A button can set your marathon pace from the race prediction.
+Optional. Enter your lactate-threshold heart rate (LTHR) and a recent race (distance and time), then pick a pace-zone model and a heart-rate zone system.
+
+**Pace zones** (from the race):
+- **Jack Daniels VDOT**: Daniels/Gilbert formulas. E 59–74% VO2max, M = predicted marathon, T = 1-hour race pace, I 95–100% VO2max, R ≈ mile pace.
+- **McMillan**: stamina and speed zones from McMillan's race-duration equivalents (steady state 1:15–2:30 race pace, tempo 40–75 min, cruise intervals 25–45 min, speed 5–25 min, sprint 2–8 min). Easy, long and recovery paces use ratios to 5K pace taken from McMillan calculator output.
+- **Tinman (Tom Schwartz)**: built around critical velocity (90% VO2max, ~30–35 min race pace); easy 65–75% vVO2max, tempo 90% and threshold 95% of CV. His own calculator is unpublished, so these are estimates.
+- **Hansons**: from predicted marathon pace. Easy MP + 1–2 min/mile, long runs MP + 40–50 s/mile, tempo = MP, strength MP − 10 s/mile, speed at 10K–5K pace.
+- **Riegel** (T2 = T1·(D2/D1)^1.06) and **Cameron** (world-record-fitted formula): race-equivalent paces (marathon, half, 1-hour threshold, 10K, 5K, mile); easy runs set at 12–30% slower than marathon pace.
+- **Best estimate**: each kind of zone averaged across all six models; predictions average Daniels, Riegel and Cameron.
+
+**Heart-rate zones** (% of LTHR): Joe Friel running, Joe Friel cycling/multisport, 80/20 Endurance (Z1, Z2, X, Z3, Y, Z4, Z5), Andy Coggan, Dr Will O'Connor (his site has you set HR zones with Friel's running percentages; above threshold he trains by pace), COROS LTHR, Garmin %LTHR (default percentages shown on the watch), Amazfit/Zepp LTHR (Zepp doesn't publish defaults; uses the commonly recommended Zepp LTHR setup), and a **best estimate** whose six zone boundaries are the averages of the matching boundaries in all those systems.
+
+Each part of the plan gets its pace zone (from its pace) and an expected heart rate: speed as a share of threshold speed is turned into % of LTHR with the 80/20 Endurance pairing of pace and heart-rate zones, then placed in the chosen system. Plans show time in pace zones and in heart-rate zones, a zone badge and bpm range on every pace-plan step and table row, and zones in the copied plan and QZ workout messages. A compare panel lists every pace model and every HR system side by side. A button can set your marathon pace from the prediction.

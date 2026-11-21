@@ -13,7 +13,7 @@
     tview: 'split', // table rows: 'split' | 'km' | '5k'
     incline: 0, mp: 330, zoneOff: Object.assign({}, E.ZONE_DEFAULTS),
     tcust: { unit: 'km', v: 2 },   // custom table rows: every v km or every v min
-    zones: { on: false, lthr: 165, raceM: 10000, raceSec: 3000 },
+    zones: { on: false, lthr: 165, raceM: 10000, raceSec: 3000, pm: 'best', hm: 'best' },
     slots: {}    // strategy -> colour slot 1..8, kept while selected
   };
   var STRATS = E.STRATEGIES;
@@ -119,12 +119,15 @@
   function pv(pace) { return tm() ? (3600 / pace).toFixed(1) + ' km/h' : E.fmtT(pace) + ' /km'; }
   /* Training zones from LTHR and a recent race (null when switched off or not enough input). */
   function zm() { return st.zones.on ? E.zoneModel(st.zones) : null; }
-  function zBadge(z, i) { return '<span class="zb" data-z="' + i + '">' + E.HR_ZONES[i].z + '</span>'; }
-  function zText(z, lo, hi) {
-    if (hi === undefined) hi = lo;
-    var hr = E.hrText(z, lo, hi);
-    return zBadge(z, lo) + (hi !== lo ? '–' + zBadge(z, hi) : '') + (hr ? ' <span class="hr">' + hr + ' bpm</span>' : '');
+  function pB(z, i) { var q = z.pm.zones[i]; return '<span class="zb zp" data-l="' + q.lvl + '" title="' + esc(q.name) + '">' + esc(q.code) + '</span>'; }
+  function hB(z, i) { var q = z.hm.zones[i]; return '<span class="zb zh" data-l="' + q.lvl + '" title="' + esc(q.name) + '">' + esc(q.code) + '</span>'; }
+  /* Pace zone, HR zone and expected heart rate for one steady pace. */
+  function zText(z, pace, walk) {
+    var out = pB(z, E.paceZoneOf(pace, z, walk));
+    if (z.lthr) { var h = E.hrZoneOf(pace, z, walk); out += ' ' + hB(z, h) + ' <span class="hr">' + E.hrText(z, h) + ' bpm, ≈' + E.hrExpected(pace, z, walk) + '</span>'; }
+    return out;
   }
+  function spanB(z, sp, f) { return f(z, sp[0]) + (sp[1] !== sp[0] ? '–' + f(z, sp[1]) : ''); }
   function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
 
   function targetSec() { return st.T; }
@@ -173,6 +176,10 @@
     });
     box.innerHTML = html;
     setMpFields(); setZoneFields();
+    $('pmodel').innerHTML = E.PACE_MODEL_IDS.map(function (k) { return '<option value="' + k + '">' + esc(E.PACE_MODEL_NAMES[k]) + '</option>'; }).join('');
+    $('hmodel').innerHTML = E.HR_MODEL_IDS.map(function (k) { return '<option value="' + k + '">' + esc(E.HR_MODELS[k].name) + '</option>'; }).join('');
+    $('pmodel').value = E.PACE_MODEL_IDS.indexOf(st.zones.pm) >= 0 ? st.zones.pm : 'best';
+    $('hmodel').value = E.HR_MODEL_IDS.indexOf(st.zones.hm) >= 0 ? st.zones.hm : 'best';
     $('zonesOn').checked = st.zones.on; $('lthr').value = st.zones.lthr || ''; $('raceM').value = String(st.zones.raceM);
     var rs = Math.round(st.zones.raceSec || 0);
     $('rh').value = Math.floor(rs / 3600) || ''; $('rmin').value = Math.floor((rs % 3600) / 60) || ''; $('rsec').value = rs % 60 || '';
@@ -222,14 +229,45 @@
     var box = $('zoneInfo'), z = E.zoneModel(st.zones);
     if (!z) { box.innerHTML = '<p class="warn">Enter a recent race time to work out your zones.</p>'; return; }
     var sp = function (p) { return tm() ? (3600 / p).toFixed(1) : E.fmtT(p); };
-    var rows = z.rows.map(function (r) {
-      var rng = r.i === 0 ? 'slower than ' + sp(r.fast) : (r.i === z.rows.length - 1 ? 'faster than ' + sp(r.slow) : (tm() ? sp(r.slow) + '–' + sp(r.fast) : sp(r.fast) + '–' + sp(r.slow)));
-      return '<tr><td>' + zBadge(z, r.i) + '</td><td class="zn">' + r.name + '</td><td>' + rng + '</td><td>' + (z.lthr ? E.hrText(z, r.i) : '–') + '</td></tr>';
+    var rng = function (q) {
+      if (q.slow === Infinity) return (tm() ? 'under ' : 'slower than ') + sp(q.fast);
+      return tm() ? sp(q.slow) + '–' + sp(q.fast) : sp(q.fast) + '–' + sp(q.slow);
+    };
+    var hrAt = function (q) {
+      if (!z.lthr) return '–';
+      var a = E.hrExpected(q.slow === Infinity ? q.fast * 1.15 : q.slow, z), b = E.hrExpected(q.fast, z);
+      return q.slow === Infinity ? '<' + (b + 1) : (a === b ? '≈' + a : a + '–' + b);
+    };
+    var prow = z.pm.zones.map(function (q, i) {
+      return '<tr><td>' + pB(z, i) + '</td><td class="zn">' + esc(q.name) + '</td><td>' + rng(q) + '</td><td>' + hrAt(q) + '</td></tr>';
+    }).join('');
+    var hrow = z.hm.zones.map(function (q, i) {
+      var pv_ = z.hm.zones[i - 1], pct = i === 0 ? '<' + z.hm.zones[1].lo : (q.hi === Infinity ? '>' + (pv_.hi >= q.lo ? q.lo : pv_.hi) : q.lo + '–' + q.hi);
+      return '<tr><td>' + hB(z, i) + '</td><td class="zn">' + esc(q.name) + '</td><td>' + pct + '%</td><td>' + (z.lthr ? E.hrText(z, i) : '–') + '</td></tr>';
     }).join('');
     var mp = z.preds[3].t / 42.195;
-    box.innerHTML = '<p class="hint">Fitness (VDOT) <b>' + z.V.toFixed(1) + '</b> · threshold pace <b>' + pv(z.tp) + '</b>' + (z.lthr ? ' at about <b>' + z.lthr + ' bpm</b>' : '') + '.<br>Equivalent races: ' +
+    // all pace models side by side
+    var cmp = E.PACE_MODEL_IDS.map(function (id) {
+      var m = E.zoneModel({ raceM: st.zones.raceM, raceSec: st.zones.raceSec, lthr: 0, pm: id, hm: 'best' });
+      var e = m.pm.zones.filter(function (q) { return q.tag === 'easy'; })[0];
+      return '<tr' + (id === z.pm.id ? ' class="cur"' : '') + '><td class="zn">' + esc(E.PACE_MODEL_NAMES[id]) + '<br><small>marathon ' + E.fmtT(m.preds[3].t) + '</small></td><td>' + (e ? rng(e) : '–') + '</td><td>' + sp(m.preds[3].t / 42.195) + '</td><td>' + sp(m.tp) + '</td></tr>';
+    }).join('');
+    var hcmp = z.lthr ? E.HR_MODEL_IDS.map(function (id) {
+      var m = E.zoneModel({ raceM: st.zones.raceM, raceSec: st.zones.raceSec, lthr: z.lthr, pm: 'vdot', hm: id });
+      return '<div class="hcmp' + (id === z.hm.id ? ' cur' : '') + '"><b>' + esc(m.hm.name) + '</b><div>' + m.hm.zones.map(function (q, i) { return '<span class="nw">' + hB(m, i) + ' ' + E.hrText(m, i) + '</span>'; }).join(' ') + '</div></div>';
+    }).join('') : '';
+    var u = tm() ? 'km/h' : '/km';
+    box.innerHTML = '<p class="hint">Threshold (1-hour race) pace <b>' + pv(z.tp) + '</b>' + (z.lthr ? ', expected at about <b>' + z.lthr + ' bpm</b>' : '') + '. Fitness (VDOT) ' + z.V.toFixed(1) + '.<br>Equivalent races: ' +
       z.preds.map(function (p) { return p.label + ' ' + E.fmtT(p.t); }).join(' · ') + '</p>' +
-      '<div class="tablewrap"><table class="ztab"><thead><tr><th>Zone</th><th class="zn">Name</th><th>' + (tm() ? 'km/h' : 'Pace /km') + '</th><th>HR bpm</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
+      '<h4 class="plan-h">Pace zones · ' + esc(z.pm.name) + '</h4>' +
+      '<div class="tablewrap"><table class="ztab"><thead><tr><th>Zone</th><th class="zn">Name</th><th>' + (tm() ? 'km/h' : 'Pace /km') + '</th><th>Expected HR</th></tr></thead><tbody>' + prow + '</tbody></table></div>' +
+      '<p class="hint">' + esc(z.pm.note) + '</p>' +
+      '<h4 class="plan-h">Heart-rate zones · ' + esc(z.hm.name) + '</h4>' +
+      (z.lthr ? '' : '<p class="warn">Enter your LTHR to see heart-rate ranges.</p>') +
+      '<div class="tablewrap"><table class="ztab"><thead><tr><th>Zone</th><th class="zn">Name</th><th>% LTHR</th><th>bpm</th></tr></thead><tbody>' + hrow + '</tbody></table></div>' +
+      '<details class="zcmp"><summary>Compare pace models</summary><div class="tablewrap"><table class="ztab"><thead><tr><th class="zn">Model</th><th>Easy</th><th>MP</th><th>Threshold ' + u + '</th></tr></thead><tbody>' + cmp + '</tbody></table></div>' +
+      '<p class="hint">McMillan, Tinman and Hansons use Daniels race equivalents for their predicted times. Riegel and Cameron use their own formulas. The best estimate averages Daniels, Riegel and Cameron.</p></details>' +
+      (hcmp ? '<details class="zcmp"><summary>Compare heart-rate systems (bpm)</summary>' + hcmp + '</details>' : '') +
       '<div class="actions"><button type="button" class="btn" id="useMp" data-mp="' + mp.toFixed(2) + '">Use ' + pv(mp) + ' as my marathon pace</button></div>';
   }
   function num(id, def) { var v = parseFloat($(id).value); return isFinite(v) ? v : def; }
@@ -240,7 +278,7 @@
     st.paceStep = +$('paceStep').value; st.speedStep = +$('speedStep').value; st.group = +$('group').value;
     st.firstSlow = +$('firstSlow').value; st.kick = +$('kick').value;
     st.incline = Math.min(15, Math.max(0, num('incline', 0)));
-    st.zones = { on: $('zonesOn').checked, lthr: num('lthr', 0), raceM: +$('raceM').value, raceSec: num('rh', 0) * 3600 + num('rmin', 0) * 60 + num('rsec', 0) };
+    st.zones = { on: $('zonesOn').checked, lthr: num('lthr', 0), raceM: +$('raceM').value, raceSec: num('rh', 0) * 3600 + num('rmin', 0) * 60 + num('rsec', 0), pm: $('pmodel').value, hm: $('hmodel').value };
   }
 
   /* ---------- rendering ---------- */
@@ -350,7 +388,7 @@
 
     var zr = zm(), z = zr;
     var runs = E.runs(r, tm()).map(function (x) {
-      return '<li' + (x.walk ? ' class="walk"' : (E.ZONE_TAG[x.role] ? ' class="mpr"' : '')) + '>' + kmTxt(x.startM) + '–' + kmTxt(x.endM) + ' km · ' + (x.walk ? 'walk ' : '') + (E.ZONE_TAG[x.role] ? E.ZONE_TAG[x.role] + ' ' : '') + '<b>' + x.label + '</b> ' + unit() + (tm() && x.incline != null ? ' @ ' + x.incline + '% incline' : '') + ' · until ' + E.fmtT(x.endT) + (zr ? ' · ' + zText(zr, E.zoneOf((x.endT - x.startT) / ((x.endM - x.startM) / 1000), zr, x.walk)) : '') + '</li>';
+      return '<li' + (x.walk ? ' class="walk"' : (E.ZONE_TAG[x.role] ? ' class="mpr"' : '')) + '>' + kmTxt(x.startM) + '–' + kmTxt(x.endM) + ' km · ' + (x.walk ? 'walk ' : '') + (E.ZONE_TAG[x.role] ? E.ZONE_TAG[x.role] + ' ' : '') + '<b>' + x.label + '</b> ' + unit() + (tm() && x.incline != null ? ' @ ' + x.incline + '% incline' : '') + ' · until ' + E.fmtT(x.endT) + (zr ? ' · ' + zText(zr, (x.endT - x.startT) / ((x.endM - x.startM) / 1000), x.walk) : '') + '</li>';
     }).join('');
     var cps = E.checkpoints(r);
     var cpHtml = cps.length ? '<div class="cp"><h4>Checkpoints</h4><ul class="plan">' + cps.map(function (c) {
@@ -362,13 +400,13 @@
     var head = tm()
       ? '<th>To km</th><th>km/h</th><th>Pace</th><th>Time</th><th>Elapsed</th><th>Vs even</th>'
       : '<th>To km</th><th>Pace</th><th>km/h</th><th>Time</th><th>Elapsed</th><th>Vs even</th>';
-    if (z) head = head.replace('<th>Time</th>', '<th>Zone</th>' + (z.lthr ? '<th>HR bpm</th>' : '') + '<th>Time</th>');
+    if (z) head = head.replace('<th>Time</th>', '<th>Zone</th>' + (z.lthr ? '<th>HR zone</th>' : '') + '<th>Time</th>');
     var prev = null, anyMixed = false;
     var tr = tableRows(r, cur);
     var zCells = function (g) {
       if (!z) return '';
       var sp = E.zoneSpan(r, g.startM, g.endM, z);
-      return '<td class="zc">' + zBadge(z, sp[0]) + (sp[1] !== sp[0] ? '–' + zBadge(z, sp[1]) : '') + '</td>' + (z.lthr ? '<td>' + E.hrText(z, sp[0], sp[1]) + '</td>' : '');
+      return '<td class="zc">' + spanB(z, sp.p, pB) + '</td>' + (z.lthr ? '<td class="zc">' + spanB(z, sp.h, hB) + ' <span class="hr">' + E.hrText(z, sp.h[0], sp.h[1]) + '</span></td>' : '');
     };
     var rows = tr.map(function (g) {
       var key = tm() ? g.speed.toFixed(1) : E.fmtT(g.pace);
@@ -409,12 +447,16 @@
 
   function tizHtml(r, z) {
     if (!z) return '';
-    var t = E.timeInZones(r, z), tot = t.reduce(function (a, b) { return a + b; }, 0) || 1;
-    var bar = t.map(function (v, i) { return v > 0 ? '<i data-z="' + i + '" style="width:' + (v / tot * 100).toFixed(2) + '%" title="' + E.HR_ZONES[i].z + ' ' + E.fmtT(v) + '"></i>' : ''; }).join('');
-    var leg = t.map(function (v, i) {
-      return v > 0.5 ? '<li>' + zBadge(z, i) + ' ' + E.HR_ZONES[i].name + ' <b>' + E.fmtT(v) + '</b> <small>' + Math.round(v / tot * 100) + '%</small></li>' : '';
-    }).join('');
-    return '<h4 class="plan-h">Time in zones</h4><div class="tizbar" aria-hidden="true">' + bar + '</div><ul class="plan tiz">' + leg + '</ul>';
+    var t = E.timeInZones(r, z);
+    var one = function (arr, list, badge, title) {
+      var tot = arr.reduce(function (a, b) { return a + b; }, 0) || 1;
+      var bar = arr.map(function (v, i) { return v > 0 ? '<i data-l="' + list[i].lvl + '" style="width:' + (v / tot * 100).toFixed(2) + '%"></i>' : ''; }).join('');
+      var leg = arr.map(function (v, i) {
+        return v > 0.5 ? '<li>' + badge(z, i) + ' ' + esc(list[i].name) + ' <b>' + E.fmtT(v) + '</b> <small>' + Math.round(v / tot * 100) + '%</small></li>' : '';
+      }).join('');
+      return '<h4 class="plan-h">' + title + '</h4><div class="tizbar ' + (badge === pB ? 'zp' : 'zh') + '" aria-hidden="true">' + bar + '</div><ul class="plan tiz">' + leg + '</ul>';
+    };
+    return one(t.p, z.pm.zones, pB, 'Time in pace zones') + (z.lthr ? one(t.h, z.hm.zones, hB, 'Time in heart-rate zones (expected)') : '');
   }
   function compareInner(plans) {
     var rs = plans.map(function (p) { return p.r; });
@@ -564,20 +606,23 @@
   }
   function zHover(g) {
     var z = zm(); if (!z) return '';
-    var i = E.zoneOf(g.pace, z, g.walk), hr = E.hrText(z, i);
-    return ', ' + E.HR_ZONES[i].z + ' ' + E.HR_ZONES[i].name.toLowerCase() + (hr ? ', HR ' + hr + ' bpm' : '');
+    var p = z.pm.zones[E.paceZoneOf(g.pace, z, g.walk)], hi = E.hrZoneOf(g.pace, z, g.walk), h = z.hm.zones[hi];
+    return ', ' + p.code + ' ' + p.name.toLowerCase() + (z.lthr ? ', ' + h.code + ' HR ' + E.hrText(z, hi) + ' bpm (≈' + E.hrExpected(g.pace, z, g.walk) + ')' : '');
   }
-  function zPlain(z, lo, hi) {
-    if (hi === undefined) hi = lo;
-    var hr = E.hrText(z, lo, hi);
-    return E.HR_ZONES[lo].z + (hi !== lo ? '–' + E.HR_ZONES[hi].z : '') + (hr ? ' HR ' + hr : '');
+  function zPlain(z, pace, walk) {
+    var p = z.pm.zones[E.paceZoneOf(pace, z, walk)].code, hi = E.hrZoneOf(pace, z, walk);
+    return p + (z.lthr ? ' ' + z.hm.zones[hi].code + ' HR ' + E.hrText(z, hi) : '');
+  }
+  function zPlainSpan(z, sp) {
+    var c = function (list, a) { return list[a[0]].code + (a[1] !== a[0] ? '–' + list[a[1]].code : ''); };
+    return c(z.pm.zones, sp.p) + (z.lthr ? ' ' + c(z.hm.zones, sp.h) + ' HR ' + E.hrText(z, sp.h[0], sp.h[1]) : '');
   }
   function copyText(id) {
     var r = last[id] || E.plan(id, cfg());
     var lines = [nameOf(id) + ' · ' + st.km + ' km · ' + (tm() ? 'treadmill' : 'outdoor') + ' · finish ' + E.fmtT(r.finish)];
     var z = zm();
     E.runs(r, tm()).forEach(function (x) {
-      var zz = z ? '  ' + zPlain(z, E.zoneOf((x.endT - x.startT) / ((x.endM - x.startM) / 1000), z, x.walk)) : '';
+      var zz = z ? '  ' + zPlain(z, (x.endT - x.startT) / ((x.endM - x.startM) / 1000), x.walk) : '';
       lines.push(kmTxt(x.startM) + '–' + kmTxt(x.endM) + ' km: ' + (x.walk ? 'walk ' : '') + x.label + ' ' + unit() + ' (until ' + E.fmtT(x.endT) + ')' + zz);
     });
     var cps = E.checkpoints(r);
@@ -587,7 +632,7 @@
     lines.push(cur.label + ':');
     tableRows(r, cur).forEach(function (g) {
       var zs = z ? E.zoneSpan(r, g.startM, g.endM, z) : null;
-      lines.push(kmTxt(g.endM) + ' km  ' + (tm() ? g.speed.toFixed(1) + ' km/h  ' : '') + E.fmtT(g.pace) + '/km' + (g.mixed ? ' (avg)' : '') + '  time ' + E.fmtT(g.time) + '  total ' + E.fmtT(g.cum) + (zs ? '  ' + zPlain(z, zs[0], zs[1]) : ''));
+      lines.push(kmTxt(g.endM) + ' km  ' + (tm() ? g.speed.toFixed(1) + ' km/h  ' : '') + E.fmtT(g.pace) + '/km' + (g.mixed ? ' (avg)' : '') + '  time ' + E.fmtT(g.time) + '  total ' + E.fmtT(g.cum) + (zs ? '  ' + zPlainSpan(z, zs) : ''));
     });
     return lines.join('\n');
   }

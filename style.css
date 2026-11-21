@@ -174,17 +174,22 @@ details.zones > summary { cursor: pointer; font-weight: 600; font-size: .85rem; 
 .zgrid input { width: 100%; min-width: 0; }
 .zgrid small { color: var(--ink3); }
 
-/* training zones: one warm hue, stronger with intensity */
-:root { --zh: 18 85% 52%; }
-.zb { display: inline-block; min-width: 2.1em; text-align: center; font-weight: 700; font-size: .78rem; line-height: 1.5; padding: 0 4px; border-radius: 4px; color: var(--ink); background: hsl(var(--zh) / var(--za, .12)); }
-.zb[data-z="0"] { --za: .08; } .zb[data-z="1"] { --za: .18; } .zb[data-z="2"] { --za: .3; } .zb[data-z="3"] { --za: .44; }
-.zb[data-z="4"] { --za: .6; } .zb[data-z="5"] { --za: .78; color: #fff; } .zb[data-z="6"] { --za: .95; color: #fff; }
+/* training zones: pace zones in teal, heart-rate zones in red, stronger with intensity (data-l 0..8) */
+:root { --zph: 178 70% 32%; --zhh: 4 75% 50%; }
+.zb { display: inline-block; min-width: 2.1em; text-align: center; font-weight: 700; font-size: .78rem; line-height: 1.5; padding: 0 4px; border-radius: 4px; color: var(--ink); background: hsl(var(--zc) / var(--za, .12)); }
+.zp { --zc: var(--zph); } .zh { --zc: var(--zhh); }
+[data-l="0"] { --za: .08; } [data-l="1"] { --za: .15; } [data-l="2"] { --za: .23; } [data-l="3"] { --za: .32; } [data-l="4"] { --za: .42; }
+[data-l="5"] { --za: .54; } [data-l="6"] { --za: .68; } [data-l="7"] { --za: .82; } [data-l="8"] { --za: .95; }
+.zb[data-l="6"], .zb[data-l="7"], .zb[data-l="8"] { color: #fff; }
 .hr { color: var(--ink2); font-size: .85em; white-space: nowrap; }
 .tizbar { display: flex; height: 12px; border-radius: 6px; overflow: hidden; background: var(--grid); margin: 4px 0 8px; }
-.tizbar i { display: block; height: 100%; background: hsl(var(--zh) / var(--za)); }
-.tizbar i[data-z="0"] { --za: .12; } .tizbar i[data-z="1"] { --za: .25; } .tizbar i[data-z="2"] { --za: .4; } .tizbar i[data-z="3"] { --za: .55; }
-.tizbar i[data-z="4"] { --za: .7; } .tizbar i[data-z="5"] { --za: .85; } .tizbar i[data-z="6"] { --za: 1; }
+.tizbar i { display: block; height: 100%; background: hsl(var(--zc) / var(--za)); }
+.tizbar.zp i { --zc: var(--zph); } .tizbar.zh i { --zc: var(--zhh); }
 .tizbar i + i { border-left: 2px solid var(--surface); }
+.zcmp { margin: 10px 0; } .zcmp > summary { cursor: pointer; font-weight: 600; font-size: .85rem; padding: 6px 0; }
+.ztab tr.cur td { font-weight: 700; }
+.ztab td.zl { white-space: normal; line-height: 1.9; }
+.nw { white-space: nowrap; margin-right: 6px; }
 .plan.tiz li { font-size: .84rem; }
 td.zc { text-align: left; }
 .ztab { font-size: .84rem; }
@@ -196,3 +201,8 @@ td.zc { text-align: left; }
 .tcust label { display: flex; align-items: center; gap: 8px; margin: 0; }
 .tcust input { width: 6em; }
 .tcust select { width: auto; }
+
+.hcmp { padding: 8px 0; border-bottom: 1px solid var(--grid); font-size: .84rem; }
+.hcmp > b { display: block; margin-bottom: 4px; }
+.hcmp > div { line-height: 2; }
+.hcmp.cur > b::after { content: ' · selected'; font-weight: 400; color: var(--ink3); }

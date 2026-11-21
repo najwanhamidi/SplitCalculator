@@ -642,9 +642,10 @@
   }
 
   /* ===== Training zones =====
-     Fitness from a recent race uses the Daniels/Gilbert VDOT formulas. Threshold pace is the pace
-     you could race for 60 minutes. Zones follow Joe Friel's run zones: pace as a % of threshold
-     pace, heart rate as a % of lactate-threshold heart rate (LTHR). */
+     Pace zones come from a recent race through one of several published models; heart-rate zones come
+     from LTHR through one of several published zone systems. Each part of a plan gets a pace zone (from
+     its pace) and an expected heart rate (from its speed relative to threshold speed, using the
+     80/20 Endurance pairing of pace and heart-rate zones), which is then placed in the chosen HR zones. */
   const vo2At = function (v) { return -4.6 + 0.182258 * v + 0.000104 * v * v; };          // v in m/min
   const pctMax = function (min) { return 0.8 + 0.1894393 * Math.exp(-0.012778 * min) + 0.2989558 * Math.exp(-0.1932605 * min); };
   const velFor = function (vo) { const a = 0.000104, b = 0.182258, c = -4.6 - vo; return (-b + Math.sqrt(b * b - 4 * a * c)) / (2 * a); };
@@ -654,61 +655,215 @@
     for (let i = 0; i < 80; i++) { const mid = (lo + hi) / 2; if (vdot(m, mid) > V) lo = mid; else hi = mid; }
     return (lo + hi) / 2;
   }
-  const HR_ZONES = [
-    { z: 'Z1', name: 'Recovery', lo: 1.29, hi: Infinity, hr: [0, 0.84] },
-    { z: 'Z2', name: 'Aerobic (easy)', lo: 1.14, hi: 1.29, hr: [0.85, 0.89] },
-    { z: 'Z3', name: 'Tempo', lo: 1.06, hi: 1.14, hr: [0.90, 0.94] },
-    { z: 'Z4', name: 'Sub-threshold', lo: 1.00, hi: 1.06, hr: [0.95, 0.99] },
-    { z: 'Z5a', name: 'Threshold', lo: 0.97, hi: 1.00, hr: [1.00, 1.02] },
-    { z: 'Z5b', name: 'VO2max', lo: 0.90, hi: 0.97, hr: [1.03, 1.06] },
-    { z: 'Z5c', name: 'Anaerobic', lo: 0, hi: 0.90, hr: [1.065, Infinity] }
-  ];
-  /* cfg: { raceM, raceSec, lthr } → { V, tp (s/km), lthr, rows[], preds[] } or null */
+  const camF = function (x) { return 13.49681 - 0.000030363 * x + 835.7114 / Math.pow(x, 0.7905); };
+  /* Race-time predictors: (raceM, raceSec, targetM) → seconds. */
+  const PRED = {
+    vdot: function (m, s, D) { return predictTime(D, vdot(m, s)); },
+    riegel: function (m, s, D) { return s * Math.pow(D / m, 1.06); },
+    cameron: function (m, s, D) { return s * (D / m) * (camF(m) / camF(D)); }
+  };
+  /* Pace (s/km) of a race lasting `sec` seconds under a predictor. */
+  function paceForDuration(pred, m, s, sec) {
+    let lo = 50, hi = 400000;
+    for (let i = 0; i < 70; i++) { const mid = Math.sqrt(lo * hi); if (pred(m, s, mid) < sec) lo = mid; else hi = mid; }
+    const D = Math.sqrt(lo * hi);
+    return sec / (D / 1000);
+  }
+  /* Canonical intensity tags, slow to fast. "Best estimate" averages every model's zone per tag. */
+  const PACE_TAGS = ['rec', 'easy', 'steady', 'mp', 'hmp', 'thr', 'cv', 'int', 'rep'];
+  const TAG_INFO = {
+    rec: ['Rec', 'Recovery'], easy: ['E', 'Easy'], steady: ['S', 'Steady / long run'], mp: ['M', 'Marathon pace'],
+    hmp: ['HM', 'Half-marathon pace'], thr: ['T', 'Threshold'], cv: ['CV', 'Critical velocity / 10K'],
+    int: ['I', 'Interval (VO2max)'], rep: ['R', 'Repetition / speed']
+  };
+  const Z = function (code, name, tag, fast, slow) { return { code: code, name: name, tag: tag, fast: fast, slow: slow }; };
+  const band = function (p, s) { return [p - s, p + s]; };
+  /* Each builder gets the race and returns { zones (any order), tp (threshold pace), preds, note }. */
+  const PACE_MODELS = {
+    vdot: { name: 'Jack Daniels VDOT', build: function (m, s) {
+      const V = vdot(m, s), P = function (f) { return 60000 / velFor(f * V); };
+      const mp = PRED.vdot(m, s, 42195) / 42.195, tp = 60000 / velFor(V * pctMax(60)), rp = PRED.vdot(m, s, 1609.34) / 1.60934;
+      return { V: V, tp: tp, note: 'VDOT ' + V.toFixed(1) + '. E is 59–74% of VO2max, T the pace you could race for an hour, I 95–100% of VO2max, R about mile race pace.',
+        zones: [Z('Rec', 'Recovery', 'rec', P(0.59), Infinity), Z('E', 'Easy / long', 'easy', P(0.74), P(0.59)), Z('M', 'Marathon', 'mp', mp - 3, mp + 3),
+          Z('T', 'Threshold', 'thr', tp - 3, tp + 3), Z('I', 'Interval', 'int', P(1.0), P(0.95)), Z('R', 'Repetition', 'rep', rp * 0.97, rp * 1.01)] };
+    } },
+    mcmillan: { name: 'McMillan', build: function (m, s) {
+      const pr = PRED.vdot, D = function (min) { return paceForDuration(pr, m, s, min * 60); }, p5 = pr(m, s, 5000) / 5;
+      return { tp: D(60), note: 'Endurance paces are ratios of your 5K pace taken from McMillan calculator output; stamina and speed zones use McMillan\'s race-duration equivalents (e.g. steady state = 1:15–2:30 race pace).',
+        zones: [Z('Rec', 'Recovery jog', 'rec', p5 * 1.375, Infinity), Z('E/L', 'Easy / long run', 'easy', p5 * 1.23, p5 * 1.375),
+          Z('SS', 'Steady state', 'steady', D(75), D(150)), Z('Tmp', 'Tempo', 'thr', D(40), D(75)), Z('CI', 'Tempo / cruise intervals', 'cv', D(25), D(45)),
+          Z('Spd', 'Speed (VO2max)', 'int', D(5), D(25)), Z('Spr', 'Sprint (anaerobic)', 'rep', D(2), D(8))] };
+    } },
+    tinman: { name: 'Tinman (Schwartz)', build: function (m, s) {
+      const V = vdot(m, s), cv = velFor(0.9 * V), P = function (f) { return 60000 / (f * cv); };
+      return { tp: paceForDuration(PRED.vdot, m, s, 3600), note: 'Critical velocity (CV) is 90% of VO2max, about your 30–35 minute race pace. Other paces are shares of CV speed (easy 65–75% of vVO2max, tempo 90%, threshold 95%). Schwartz\'s own calculator is unpublished, so these are close estimates.',
+        zones: [Z('Rec', 'Recovery', 'rec', P(0.71), Infinity), Z('E', 'Easy', 'easy', P(0.81), P(0.71)), Z('Mod', 'Moderate', 'steady', P(0.84), P(0.81)),
+          Z('ET', 'Easy tempo', 'mp', P(0.865), P(0.84)), Z('Tmp', 'Tempo', 'hmp', P(0.91), P(0.89)), Z('Thr', 'Threshold', 'thr', P(0.96), P(0.94)),
+          Z('CV', 'Critical velocity', 'cv', P(1.015), P(0.985)), Z('VO2', '5K–3K (VO2max)', 'int', P(1.10), P(1.04)), Z('Rep', 'Repetition', 'rep', P(1.2), P(1.12))] };
+    } },
+    hansons: { name: 'Hansons', build: function (m, s) {
+      const pr = PRED.vdot, mp = pr(m, s, 42195) / 42.195, p5 = pr(m, s, 5000) / 5, p10 = pr(m, s, 10000) / 10;
+      return { tp: paceForDuration(pr, m, s, 3600), note: 'Anchored on marathon pace from your race (Daniels equivalents): easy 1–2 min/mile slower than MP, long runs about 40–50 s/mile slower, tempo at MP, strength 10 s/mile faster than MP, speed at 10K to 5K pace.',
+        zones: [Z('Rec', 'Recovery', 'rec', mp + 75, Infinity), Z('E', 'Easy', 'easy', mp + 37, mp + 75), Z('L', 'Long run', 'steady', mp + 25, mp + 31),
+          Z('Tmp', 'Tempo (MP)', 'mp', mp - 3, mp + 3), Z('Str', 'Strength', 'hmp', mp - 9, mp - 3), Z('Spd', 'Speed (10K–5K)', 'int', p5, p10),
+          Z('R', 'Faster than 5K', 'rep', p5 * 0.93, p5 * 0.97)] };
+    } },
+    riegel: { name: 'Riegel', build: function (m, s) { return racePaceZones(PRED.riegel, m, s, 'Riegel\'s formula T2 = T1 × (D2/D1)^1.06 gives race-equivalent paces; easy runs are 12–30% slower than marathon pace.'); } },
+    cameron: { name: 'Cameron', build: function (m, s) { return racePaceZones(PRED.cameron, m, s, 'Dave Cameron\'s formula (fitted to world records) gives race-equivalent paces; easy runs are 12–30% slower than marathon pace.'); } }
+  };
+  function racePaceZones(pr, m, s, note) {
+    const P = function (D) { return pr(m, s, D) / (D / 1000); }, mp = P(42195), hm = P(21097.5), tp = paceForDuration(pr, m, s, 3600);
+    return { tp: tp, note: note,
+      zones: [Z('Rec', 'Recovery', 'rec', mp * 1.30, Infinity), Z('E', 'Easy', 'easy', mp * 1.12, mp * 1.30), Z('L', 'Long / steady', 'steady', mp * 1.04, mp * 1.12),
+        Z('M', 'Marathon', 'mp', ...band(mp, 3)), Z('HM', 'Half marathon', 'hmp', ...band(hm, 3)), Z('T', 'Threshold (1 hour)', 'thr', ...band(tp, 3)),
+        Z('10K', '10K', 'cv', ...band(P(10000), 3)), Z('5K', '5K', 'int', ...band(P(5000), 3)), Z('Mile', 'Mile', 'rep', ...band(P(1609.34), 3))] };
+  }
+  const PACE_MODEL_IDS = ['best', 'vdot', 'mcmillan', 'tinman', 'hansons', 'riegel', 'cameron'];
+  const PACE_MODEL_NAMES = { best: 'Best estimate' };
+  Object.keys(PACE_MODELS).forEach(function (k) { PACE_MODEL_NAMES[k] = PACE_MODELS[k].name; });
+
+  /* Contiguous classification bands from a model's zones: sorted slow → fast, cut midway through any gap or overlap. */
+  function finishPaceModel(id, o) {
+    const zones = o.zones.filter(function (z) { return z.fast > 0 && z.slow > z.fast - 1e-9; }).slice();
+    const mid = function (z) { return z.slow === Infinity ? z.fast * 10 : (z.fast + z.slow) / 2; };
+    zones.sort(function (a, b) { return mid(b) - mid(a); });
+    zones.forEach(function (z, i) { z.lvl = Math.max(0, PACE_TAGS.indexOf(z.tag)); z.i = i; });
+    const cuts = [];   // cuts[i] = boundary between zone i and zone i+1 (pace, s/km)
+    for (let i = 0; i < zones.length - 1; i++) cuts.push((zones[i].fast + (zones[i + 1].slow === Infinity ? zones[i + 1].fast : zones[i + 1].slow)) / 2);
+    return { id: id, name: PACE_MODEL_NAMES[id], zones: zones, cuts: cuts, tp: o.tp, V: o.V, note: o.note };
+  }
+  function paceModel(id, m, s) {
+    if (id !== 'best') return finishPaceModel(id, PACE_MODELS[id].build(m, s));
+    const all = Object.keys(PACE_MODELS).map(function (k) { return PACE_MODELS[k].build(m, s); });
+    const zones = [];
+    PACE_TAGS.forEach(function (tag) {
+      let f = 0, sl = 0, nf = 0, ns = 0;
+      all.forEach(function (o) {
+        const zs = o.zones.filter(function (z) { return z.tag === tag; });
+        if (!zs.length) return;
+        f += Math.min.apply(null, zs.map(function (z) { return z.fast; })); nf++;
+        const slow = Math.max.apply(null, zs.map(function (z) { return z.slow; }));
+        if (slow !== Infinity) { sl += slow; ns++; }
+      });
+      if (nf) zones.push(Z(TAG_INFO[tag][0], TAG_INFO[tag][1], tag, f / nf, tag === 'rec' ? Infinity : sl / Math.max(1, ns)));
+    });
+    const tp = all.reduce(function (a, o) { return a + o.tp; }, 0) / all.length;
+    return finishPaceModel('best', { zones: zones, tp: tp, note: 'Each zone is the average of the same kind of zone across all six pace models, and threshold pace is the average of their threshold paces.' });
+  }
+
+  /* Heart-rate zone systems, as % of LTHR (published ranges). */
+  const HZ = function (code, name, lo, hi) { return { code: code, name: name, lo: lo, hi: hi }; };
+  const HR_MODELS = {
+    frielRun: { name: 'Joe Friel (running)', zones: [HZ('Z1', 'Recovery', 0, 84), HZ('Z2', 'Aerobic', 85, 89), HZ('Z3', 'Tempo', 90, 94), HZ('Z4', 'Sub-threshold', 95, 99), HZ('Z5a', 'Super-threshold', 100, 102), HZ('Z5b', 'Aerobic capacity', 103, 106), HZ('Z5c', 'Anaerobic capacity', 106.5, Infinity)] },
+    frielBike: { name: 'Joe Friel (cycling / multisport)', zones: [HZ('Z1', 'Recovery', 0, 80), HZ('Z2', 'Aerobic', 81, 89), HZ('Z3', 'Tempo', 90, 93), HZ('Z4', 'Sub-threshold', 94, 99), HZ('Z5a', 'Super-threshold', 100, 102), HZ('Z5b', 'Aerobic capacity', 103, 106), HZ('Z5c', 'Anaerobic capacity', 106.5, Infinity)] },
+    e8020: { name: '80/20 Endurance', zones: [HZ('Z1', 'Low aerobic', 0, 81), HZ('Z2', 'Moderate aerobic', 81, 90), HZ('X', 'Zone X (avoid)', 90, 95), HZ('Z3', 'Threshold', 95, 100), HZ('Y', 'Zone Y (avoid)', 100, 102), HZ('Z4', 'VO2max', 102, 105), HZ('Z5', 'Speed', 105, Infinity)] },
+    coggan: { name: 'Andy Coggan', zones: [HZ('Z1', 'Active recovery', 0, 68), HZ('Z2', 'Endurance', 69, 83), HZ('Z3', 'Tempo', 84, 94), HZ('Z4', 'Lactate threshold', 95, 105), HZ('Z5', 'VO2max', 106, Infinity)] },
+    oconnor: { name: 'Dr Will O\'Connor', zones: [HZ('Z1', 'Easy / recovery', 0, 84), HZ('Z2', 'Aerobic endurance', 85, 89), HZ('Z3', 'Steady / tempo', 90, 94), HZ('Z4', 'Threshold', 95, 100), HZ('Z5+', 'Above threshold (use pace)', 101, Infinity)] },
+    coros: { name: 'COROS (LTHR)', zones: [HZ('Z1', 'Recovery', 0, 80), HZ('Z2', 'Aerobic endurance', 80, 90), HZ('Z3', 'Aerobic power', 90, 95), HZ('Z4', 'Threshold', 95, 102), HZ('Z5', 'Anaerobic endurance', 102, 106), HZ('Z6', 'Anaerobic power', 106, Infinity)] },
+    garmin: { name: 'Garmin (%LTHR)', zones: [HZ('Z1', 'Warm up', 0, 79), HZ('Z2', 'Easy', 80, 88), HZ('Z3', 'Aerobic', 89, 94), HZ('Z4', 'Threshold', 95, 99), HZ('Z5', 'Maximum', 100, Infinity)] },
+    amazfit: { name: 'Amazfit / Zepp (LTHR)', zones: [HZ('Z1', 'Recovery', 0, 81), HZ('Z2', 'Aerobic', 81, 90), HZ('Z3', 'Tempo', 90, 94), HZ('Z4', 'Threshold', 94, 100), HZ('Z5', 'VO2max', 100, Infinity)] }
+  };
+  /* Best estimate: six zones whose boundaries are the average of the matching boundaries in every system above. */
+  (function () {
+    const B = { // tops of recovery, aerobic, tempo, threshold, VO2max (null when a system has no such split)
+      frielRun: [84.5, 89.5, 94.5, 99.5, 106.5], frielBike: [80.5, 89.5, 93.5, 99.5, 106.5], e8020: [81, 90, 95, 100, 105],
+      coggan: [68.5, 83.5, 94.5, 105.5, null], oconnor: [84.5, 89.5, 94.5, 100.5, null], coros: [80, 90, 95, 102, 106],
+      garmin: [79.5, 88.5, 94.5, 99.5, null], amazfit: [81, 90, 94, 100, null]
+    };
+    const avg = [0, 1, 2, 3, 4].map(function (k) {
+      const v = Object.keys(B).map(function (m) { return B[m][k]; }).filter(function (x) { return x != null; });
+      return v.reduce(function (a, b) { return a + b; }, 0) / v.length;
+    });
+    const r = function (x) { return Math.round(x * 2) / 2; };
+    const c = avg.map(r);
+    HR_MODELS.best = { name: 'Best estimate', zones: [HZ('Z1', 'Recovery', 0, c[0]), HZ('Z2', 'Aerobic', c[0], c[1]), HZ('Z3', 'Tempo', c[1], c[2]), HZ('Z4', 'Threshold', c[2], c[3]), HZ('Z5', 'VO2max', c[3], c[4]), HZ('Z6', 'Anaerobic', c[4], Infinity)] };
+  })();
+  const HR_MODEL_IDS = ['best', 'frielRun', 'frielBike', 'e8020', 'coggan', 'oconnor', 'coros', 'garmin', 'amazfit'];
+  Object.keys(HR_MODELS).forEach(function (k) {
+    const zs = HR_MODELS[k].zones, n = zs.length;
+    zs.forEach(function (z, i) { z.i = i; z.lvl = Math.round(i / (n - 1) * 8); });
+    HR_MODELS[k].cuts = zs.slice(0, -1).map(function (z, i) { return (z.hi + zs[i + 1].lo) / 2; });   // % of LTHR
+  });
+  /* Expected steady-state %LTHR for a speed given as a share of threshold speed (80/20 Endurance pairing). */
+  const HR_MAP = [[0.40, 0.60], [0.60, 0.72], [0.76, 0.81], [0.87, 0.90], [0.93, 0.95], [1.00, 1.00], [1.02, 1.02], [1.15, 1.05], [1.40, 1.08]];
+  function hrPctFor(speedFrac) {
+    const t = HR_MAP;
+    if (speedFrac <= t[0][0]) return t[0][1];
+    for (let i = 1; i < t.length; i++) if (speedFrac <= t[i][0]) return t[i - 1][1] + (t[i][1] - t[i - 1][1]) * (speedFrac - t[i - 1][0]) / (t[i][0] - t[i - 1][0]);
+    return t[t.length - 1][1];
+  }
+
+  /* cfg: { raceM, raceSec, lthr, pm (pace model id), hm (HR model id) } → zone model, or null without a usable race. */
   function zoneModel(cfg) {
     if (!(cfg && cfg.raceM > 0 && cfg.raceSec > 0)) return null;
     const pace = cfg.raceSec / (cfg.raceM / 1000);
     if (pace < 100 || pace > 1500) return null;
     const V = vdot(cfg.raceM, cfg.raceSec);
     if (!(V > 10 && V < 95)) return null;
-    const tp = 60000 / velFor(V * pctMax(60));
+    const pmId = PACE_MODEL_IDS.indexOf(cfg.pm) >= 0 ? cfg.pm : 'best', hmId = HR_MODEL_IDS.indexOf(cfg.hm) >= 0 ? cfg.hm : 'best';
+    const pm = paceModel(pmId, cfg.raceM, cfg.raceSec);
+    const hm = HR_MODELS[hmId];
     const L = cfg.lthr > 0 ? cfg.lthr : 0;
-    const rows = HR_ZONES.map(function (z, i) {
-      return {
-        i: i, z: z.z, name: z.name, slow: z.hi === Infinity ? Infinity : tp * z.hi, fast: tp * z.lo,
-        hrLo: L ? (i === 0 ? 0 : Math.round(z.hr[0] * L)) : 0,
-        hrHi: L ? (z.hr[1] === Infinity ? Infinity : Math.round(z.hr[1] * L)) : 0
-      };
-    });
-    const preds = [[5000, '5K'], [10000, '10K'], [21097.5, 'Half'], [42195, 'Marathon']].map(function (d) { return { label: d[1], M: d[0], t: predictTime(d[0], V) }; });
-    return { V: V, tp: tp, lthr: L, rows: rows, preds: preds };
+    const P = {
+      vdot: function (D) { return PRED.vdot(cfg.raceM, cfg.raceSec, D); }, riegel: function (D) { return PRED.riegel(cfg.raceM, cfg.raceSec, D); },
+      cameron: function (D) { return PRED.cameron(cfg.raceM, cfg.raceSec, D); }
+    };
+    const pk = pmId === 'riegel' || pmId === 'cameron' ? [pmId] : (pmId === 'best' ? ['vdot', 'riegel', 'cameron'] : ['vdot']);
+    const predict = function (D) { return pk.reduce(function (a, k) { return a + P[k](D); }, 0) / pk.length; };
+    const preds = [[5000, '5K'], [10000, '10K'], [21097.5, 'Half'], [42195, 'Marathon']].map(function (d) { return { label: d[1], M: d[0], t: predict(d[0]) }; });
+    return { V: V, tp: pm.tp, lthr: L, pm: pm, hm: hm, preds: preds, predictor: pk };
   }
-  function zoneOf(pace, zm, walk) {
+  function paceZoneOf(pace, zm, walk) {
     if (walk) return 0;
-    const r = pace / zm.tp;
-    for (let i = 0; i < HR_ZONES.length; i++) if (r >= HR_ZONES[i].lo) return i;
-    return HR_ZONES.length - 1;
+    const c = zm.pm.cuts;
+    for (let i = 0; i < c.length; i++) if (pace > c[i]) return i;
+    return c.length;
   }
-  /* Lowest and highest zone touched between two distances. */
+  function hrPct(pace, zm, walk) { return walk ? 0.6 : hrPctFor(zm.tp / pace); }
+  function hrZoneOfPct(pct, zm) {
+    const c = zm.hm.cuts, p = pct * 100;
+    for (let i = 0; i < c.length; i++) if (p < c[i]) return i;
+    return c.length;
+  }
+  function hrZoneOf(pace, zm, walk) { return hrZoneOfPct(hrPct(pace, zm, walk), zm); }
+  /* Lowest and highest pace zone and HR zone touched between two distances. */
   function zoneSpan(res, a, b, zm) {
-    let lo = 99, hi = -1;
+    const o = { p: [99, -1], h: [99, -1] };
     res.segs.forEach(function (s) {
-      if (s.endM > a + 1e-6 && s.startM < b - 1e-6) { const z = zoneOf(s.pace, zm, s.walk); lo = Math.min(lo, z); hi = Math.max(hi, z); }
+      if (s.endM > a + 1e-6 && s.startM < b - 1e-6) {
+        const p = paceZoneOf(s.pace, zm, s.walk), h = hrZoneOf(s.pace, zm, s.walk);
+        o.p = [Math.min(o.p[0], p), Math.max(o.p[1], p)]; o.h = [Math.min(o.h[0], h), Math.max(o.h[1], h)];
+      }
     });
-    return hi < 0 ? [0, 0] : [lo, hi];
+    if (o.p[1] < 0) o.p = [0, 0];
+    if (o.h[1] < 0) o.h = [0, 0];
+    return o;
   }
   function timeInZones(res, zm) {
-    const t = HR_ZONES.map(function () { return 0; });
-    res.segs.forEach(function (s) { t[zoneOf(s.pace, zm, s.walk)] += s.time; });
-    return t;
+    const p = zm.pm.zones.map(function () { return 0; }), h = zm.hm.zones.map(function () { return 0; });
+    res.segs.forEach(function (s) { p[paceZoneOf(s.pace, zm, s.walk)] += s.time; h[hrZoneOf(s.pace, zm, s.walk)] += s.time; });
+    return { p: p, h: h };
   }
+  /* bpm bounds of HR zone i: published % ranges; where one zone ends exactly where the next begins, the lower zone stops 1 bpm short. */
+  function hrBpm(zm, i) {
+    const L = zm.lthr, zs = zm.hm.zones, z = zs[i], nx = zs[i + 1];
+    const lo = i === 0 ? 0 : Math.round(z.lo / 100 * L);
+    let hi = !nx ? Infinity : Math.round(z.hi / 100 * L);
+    if (nx && nx.lo <= z.hi) hi = Math.round(nx.lo / 100 * L) - 1;
+    return [lo, hi];
+  }
+  /* bpm text for HR zones lo..hi of the chosen system. */
   function hrText(zm, lo, hi) {
     if (!zm.lthr) return '';
-    const a = zm.rows[lo], b = zm.rows[hi === undefined ? lo : hi];
-    if (a.hrLo === 0 && b.hrHi === Infinity) return 'any';
-    if (a.hrLo === 0) return '<' + (b.hrHi + 1);
-    if (b.hrHi === Infinity) return '>' + (a.hrLo - 1);
-    return a.hrLo + '–' + b.hrHi;
+    if (hi === undefined) hi = lo;
+    const a = hrBpm(zm, lo)[0], b = hrBpm(zm, hi)[1];
+    if (a === 0 && b === Infinity) return 'any';
+    if (a === 0) return '<' + (b + 1);
+    if (b === Infinity) return '>' + (a - 1);
+    return a + '–' + b;
   }
+  function hrExpected(pace, zm, walk) { return zm.lthr ? Math.round(hrPct(pace, zm, walk) * zm.lthr) : 0; }
+
 
   /* Time at every 5 km plus the half-marathon mark, for distances that pass them. */
   function checkpoints(res) {
@@ -760,7 +915,7 @@
       const speed = +x.label;
       const dur = Math.round(x.endT) - Math.round(x.startT);
       let msg = 'Interval ' + (i + 1) + (x.walk ? ' walk' : '') + (ZONE_TAG[x.role] ? ' ' + ZONE_TAG[x.role] : '') + ' (' + fmtKm(x.startM) + '-' + fmtKm(x.endM) + ' km)';
-      if (opts.zones) { const zi = zoneOf(3600 / speed, opts.zones, x.walk); msg += ' ' + HR_ZONES[zi].z + (opts.zones.lthr ? ' HR ' + hrText(opts.zones, zi) : ''); }
+      if (opts.zones) { const zp = opts.zones, pc = 3600 / speed, hi = hrZoneOf(pc, zp, x.walk); msg += ' ' + zp.pm.zones[paceZoneOf(pc, zp, x.walk)].code + (zp.lthr ? ' ' + zp.hm.zones[hi].code + ' HR ' + hrText(zp, hi) : ''); }
       return { dur: dur, speed: speed, msg: msg, incline: x.incline != null ? x.incline : incline };
     }).filter(function (r) { return r.dur > 0; });
     let xml = '<?xml version="1.0" encoding="UTF-8"?>\n<rows device="treadmill">\n';
@@ -776,7 +931,8 @@
     STRATEGIES: STRATEGIES, MP_IDS: MP_IDS, LR_IDS: LR_IDS, LR_UI: LR_UI, ZONE_DEFAULTS: ZONE_DEFAULTS, ZONE_LABELS: ZONE_LABELS, ZONE_TAG: ZONE_TAG,
     isMpLike: function (id) { return MP_IDS.indexOf(id) >= 0 || !!LR[id]; }, PARAM_DEFAULTS: PARAM_DEFAULTS, params: params, plan: plan, timeAt: timeAt,
     checkpoints: checkpoints, windows: windows, windowsByTime: windowsByTime, distAt: distAt,
-    HR_ZONES: HR_ZONES, vdot: vdot, predictTime: predictTime, zoneModel: zoneModel, zoneOf: zoneOf, zoneSpan: zoneSpan, timeInZones: timeInZones, hrText: hrText, fmtT: fmtT, fmtSigned: fmtSigned, fmtKm: fmtKm, runs: runs, buildSegments: buildSegments
+    vdot: vdot, predictTime: predictTime, PRED: PRED, zoneModel: zoneModel, paceZoneOf: paceZoneOf, hrZoneOf: hrZoneOf, hrPct: hrPct, hrExpected: hrExpected, zoneSpan: zoneSpan, timeInZones: timeInZones, hrText: hrText,
+    PACE_MODEL_IDS: PACE_MODEL_IDS, PACE_MODEL_NAMES: PACE_MODEL_NAMES, HR_MODEL_IDS: HR_MODEL_IDS, HR_MODELS: HR_MODELS, paceModel: paceModel, fmtT: fmtT, fmtSigned: fmtSigned, fmtKm: fmtKm, runs: runs, buildSegments: buildSegments
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.SplitEngine = api;

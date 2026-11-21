@@ -130,6 +130,10 @@
     <summary>Heart rate and training zones</summary>
     <label class="switch"><input type="checkbox" id="zonesOn"><span>Show the expected training zone and heart-rate range for every part of each plan</span></label>
     <div class="grid2">
+      <label><span>Pace zones from</span><select id="pmodel"></select></label>
+      <label><span>Heart-rate zones from</span><select id="hmodel"></select></label>
+    </div>
+    <div class="grid2">
       <label><span>Lactate threshold HR (bpm)</span>
         <input id="lthr" type="number" inputmode="numeric" min="100" max="230" placeholder="e.g. 165"></label>
       <label><span>Recent race</span>
@@ -145,7 +149,7 @@
       <label><input id="rsec" type="number" inputmode="numeric" min="0" max="59" placeholder="0" aria-label="Race seconds"><span>sec</span></label>
     </div>
     <div id="zoneInfo"></div>
-    <p class="hint">Your race sets your threshold pace (the pace you could race for about an hour). Zones follow Joe Friel's run zones: pace as a share of threshold pace, heart rate as a share of LTHR. Heart rate lags behind pace changes, drifts up on long runs and rises in heat, so treat the ranges as a guide.</p>
+    <p class="hint">Pace zones come from your race through the model you pick. Heart rate is estimated from how fast each part is compared with your threshold (1-hour race) pace, using the 80/20 Endurance pairing of pace and heart-rate zones, then placed in the heart-rate system you pick. Heart rate lags behind pace changes, drifts up on long runs and rises in heat, so treat it as a guide.</p>
   </details>
 
   <section class="panel" aria-labelledby="h-strat">
